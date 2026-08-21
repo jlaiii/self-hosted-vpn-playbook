@@ -1,0 +1,21 @@
+# wg-easy self-service dashboard template.
+# Fill in WG_HOST and PASSWORD_HASH before use — see docs/02-wg-easy-dashboard.md.
+services:
+  wg-easy:
+    image: ghcr.io/wg-easy/wg-easy:latest
+    container_name: wg-easy
+    restart: unless-stopped
+    network_mode: host            # host netns so tunnel-IP DNS (AdGuard) keeps working
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - WG_HOST=<VPS_PUBLIC_IP>
+      - PASSWORD_HASH=<BCRYPT_HASH>       # $$-escape $ chars; NOT "PASSWORD"
+      - WG_PORT=51820
+      - WG_DEFAULT_ADDRESS=10.66.66.x     # literal x, NOT CIDR
+      - WG_DEFAULT_DNS=10.66.66.1
+      - WG_PERSISTENT_KEEPALIVE=25
+      - WG_ALLOWED_IPS=0.0.0.0/0
+      - TZ=America/Chicago
+    volumes:
+      - ./config:/etc/wireguard
