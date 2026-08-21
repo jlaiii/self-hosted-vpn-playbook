@@ -83,41 +83,55 @@ def main():
     if status != 200:
         sys.exit(f"client create failed (HTTP {status}): {raw.decode()[:300]}")
 
-    # wg-easy persists client keys in the mounted config volume.
+    # wg-easy persists client keys in the mounted config volume. The API
+    # list `id` differs from the wg0.json map key — the key is what the
+    # configuration endpoint resolves by.
     cfg = json.load(open(CONFIG_JSON))
     clients = cfg.get("clients", {})
-    client = next((c for c in clients.values() if c.get("name") == args.name), None)
+    key, client = next(((k, c) for k, c in clients.items() if c.get("name") == args.name),
+                       (None, None))
     if not client:
         sys.exit("client created but not found in " + CONFIG_JSON)
 
-    status, _, raw = http("GET", "/api/wireguard/server", cookie=cookie)
-    server = json.loads(raw) if status == 200 else {}
-    srv_pub = server.get("publicKey")
-    if not srv_pub:
-        sys.exit("could not fetch server public key")
+    # Preferred: wg-easy's own configuration endpoint (returns the full,
+    # authoritative config incl. private key, DNS, endpoint, keepalive).
+    status, _, raw = http("GET",
+                          f"/api/wireguard/client/{key}/configuration",
+                          cookie=cookie)
+    if status == 200 and b"[Interface]" in raw:
+        conf = raw.decode()
+    else:
+        # Fallback: assemble manually (older wg-easy without the endpoint).
+        srv_pub = (cfg.get("server") or {}).get("publicKey")
+        if not srv_pub:
+            r = subprocess.run(["wg", "show", "wg0"], capture_output=True, text=True)
+            for line in r.stdout.splitlines():
+                if "public key:" in line:
+                    srv_pub = line.split("public key: ")[1].strip()
+                    break
+        if not srv_pub:
+            sys.exit("could not find server public key")
+        endpoint = args.endpoint or os.environ.get("WG_HOST")
+        if not endpoint:
+            endpoint = "<VPS_PUBLIC_IP>"  # placeholder; user must fill
+        conf = (
+            "[Interface]\n"
+            f"PrivateKey = {client['privateKey']}\n"
+            f"Address = {client['address']}/{MASK}\n"
+            f"DNS = {DNS}\n\n"
+            "[Peer]\n"
+            f"PublicKey = {srv_pub}\n"
+            f"PresharedKey = {client['preSharedKey']}\n"
+            f"Endpoint = {endpoint}:{os.environ.get('WG_PORT', '51820')}\n"
+            f"AllowedIPs = {args.allowed_ips}\n"
+            f"PersistentKeepalive = {args.keepalive}\n"
+        )
 
-    endpoint = args.endpoint or os.environ.get("WG_HOST")
-    if not endpoint:
-        # fall back: whatever is in the volume server config
-        for line in open(os.path.join(os.path.dirname(CONFIG_JSON), "wg0.conf")):
-            if line.startswith("Address"):
-                endpoint = line.split("=", 1)[1].strip().split("/")[0]
-                break
-    if not endpoint:
-        endpoint = "<VPS_PUBLIC_IP>"  # placeholder; user must fill
-
-    conf = (
-        "[Interface]\n"
-        f"PrivateKey = {client['privateKey']}\n"
-        f"Address = {client['address']}/{MASK}\n"
-        f"DNS = {DNS}\n\n"
-        "[Peer]\n"
-        f"PublicKey = {srv_pub}\n"
-        f"PresharedKey = {client['preSharedKey']}\n"
-        f"Endpoint = {endpoint}:{os.environ.get('WG_PORT', '51820')}\n"
-        f"AllowedIPs = {args.allowed_ips}\n"
-        f"PersistentKeepalive = {args.keepalive}\n"
-    )
+    addr = ""
+    for line in conf.splitlines():
+        if line.startswith("Address"):
+            addr = line.split("=", 1)[1].strip()
+            break
 
     os.makedirs(args.outdir, exist_ok=True)
     safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in args.name)
@@ -132,7 +146,8 @@ def main():
         sys.exit("qrencode failed: " + r.stderr.decode())
 
     print(f"Profile created: {args.name}")
-    print(f"Address: {client['address']}/{MASK}")
+    print(f"Address: {addr or 'unknown'}")
+    print(f"ClientId (config key): {key}")
     print(f"Conf: {conf_path}")
     print(f"QR:   {qr_path}")
     print(f"MEDIA:{qr_path}")
