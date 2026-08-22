@@ -1,26 +1,37 @@
 #!/usr/bin/env python3
-"""VPN stack health watchdog (wg-easy + AdGuard Home).
+"""Advanced VPN stack health watchdog (wg-easy + AdGuard Home + dashboard).
 
 Prints NOTHING and exits 0 when healthy (no_agent cron => silent tick).
-Prints "FLAG:" lines and exits non-zero when broken (cron delivers the
-output as an alert, and the AI autofix job parses the FLAG lines).
+Prints "FLAG:" lines and exits non-zero when broken.
 
 Checks:
   1. wg-easy container running + healthy
   2. wg0 interface up, UDP <WG_PORT> listening
   3. nft rules present: MASQUERADE, 2x FORWARD accept, UI-port public block
-  4. AdGuard Home unit active + answering on the tunnel IP
+  4. AdGuard unit active + answering on the tunnel IP
   5. Ad blocking still effective (test domain -> 0.0.0.0)
   6. wg-nft-rules unit enabled (survives reboot)
+  7. Dashboard unit active + HTTP 200
+  8. Peer endpoint sanity — a real device must never show a private/test
+     endpoint (catches stale test rigs stealing a device's tunnel slot)
+  9. ACTIVE EGRESS TEST — spins a throwaway WireGuard client (dedicated
+     "healthcheck" peer, its own key) in a netns and proves real traffic:
+     handshake -> ICMP to 1.1.1.1 -> HTTPS egress with the server's public
+     IP. Catches forwarding/NAT/routing failures that presence checks miss.
 
 Env overrides (defaults match the self-hosted-vpn-playbook):
   CONTAINER=wg-easy  WG_IF=wg0  WG_PORT=51820  UI_PORT=51821
   WG_SUBNET=10.66.66.0/24  DNS_IP=10.66.66.1  ADGUARD_UNIT=adguardhome
-  RULES_UNIT=wg-nft-rules  BLOCK_TEST_DOMAIN=doubleclick.net
+  RULES_UNIT=wg-nft-rules  DASH_UNIT=vps-dashboard  DASH_URL=http://<DNS_IP>:8088/
+  BLOCK_TEST_DOMAIN=doubleclick.net  WG_EASY_CONFIG=/root/wg-easy/config/wg0.json
+  HEALTHCHECK_CLIENT=healthcheck  EXPECTED_EGRESS_IP=<server public IP>
 """
+import ipaddress
+import json
 import os
 import subprocess
 import sys
+import time
 
 CONTAINER = os.environ.get("CONTAINER", "wg-easy")
 WG_IF = os.environ.get("WG_IF", "wg0")
@@ -33,12 +44,18 @@ RULES_UNIT = os.environ.get("RULES_UNIT", "wg-nft-rules")
 DASH_UNIT = os.environ.get("DASH_UNIT", "vps-dashboard")
 DASH_URL = os.environ.get("DASH_URL", f"http://{DNS_IP}:8088/")
 BLOCK_TEST = os.environ.get("BLOCK_TEST_DOMAIN", "doubleclick.net")
+WG_EASY_CONFIG = os.environ.get("WG_EASY_CONFIG", "/root/wg-easy/config/wg0.json")
+HEALTHCHECK_CLIENT = os.environ.get("HEALTHCHECK_CLIENT", "healthcheck")
+TEST_NS = "vpn-health-ns"
+TEST_HOST_IP = "10.88.88.1"
+TEST_CLIENT_IP = "10.88.88.2"
+LOCK = "/tmp/vpn-health-check.lock"
 
 flags = []
 
 
-def sh(cmd):
-    return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+def sh(cmd, timeout=30):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
 
 
 def flag(msg):
@@ -53,8 +70,9 @@ else:
     parts = r.stdout.strip().split()
     if parts[0] != "running":
         flag(f"wg-easy container not running (state: {r.stdout.strip() or '?'})")
-    elif len(parts) > 1 and parts[1] not in ("healthy", ""):
+    elif len(parts) > 1 and parts[1] == "unhealthy":
         flag(f"wg-easy container unhealthy ({parts[1]})")
+    # "starting" is the normal post-restart warmup — not a flag
 
 # 2. interface + listener
 r = sh(f"wg show {WG_IF}")
@@ -85,7 +103,7 @@ if r.stdout.strip() != "active":
     flag(f"AdGuard unit '{ADGUARD_UNIT}' not active ({r.stdout.strip() or 'unknown'})")
 else:
     r = sh(f"dig +short +time=3 @{DNS_IP} example.com")
-    if r.returncode != 0 or not any(part.replace(".", "").isdigit() for part in r.stdout.split()):
+    if r.returncode != 0 or not any(p.replace(".", "").isdigit() for p in r.stdout.split()):
         flag(f"AdGuard not answering DNS on {DNS_IP}:53")
 
 # 5. ad blocking effective
@@ -107,10 +125,107 @@ else:
     if r.stdout.strip() != "200":
         flag(f"dashboard not responding at {DASH_URL} (HTTP {r.stdout.strip() or 'timeout'})")
 
+# 8. peer endpoint sanity (RFC1918/link-local/loopback endpoints = impostor)
+#    The healthcheck peer legitimately uses the test veth IP — exempt it.
+hc_pubkey = None
+try:
+    cfg8 = json.load(open(WG_EASY_CONFIG))
+    hc8 = next((c for c in cfg8.get("clients", {}).values()
+                if c.get("name") == HEALTHCHECK_CLIENT), None)
+    hc_pubkey = hc8["publicKey"] if hc8 else None
+except Exception:
+    pass
+r = sh(f"wg show {WG_IF} dump")
+for line in r.stdout.strip().splitlines()[1:]:
+    parts = line.split("\t")
+    if len(parts) < 8 or not parts[2]:
+        continue
+    if parts[0] == hc_pubkey:
+        continue
+    ep = parts[2]
+    ip = ep.split(":")[0]
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        continue
+    if a.is_private or a.is_loopback or a.is_link_local:
+        flag(f"peer {parts[0][:10]}… has private/test endpoint {ep} — "
+             "a test rig or stale client is holding the tunnel slot")
+
+# 9. active egress test (dedicated healthcheck peer, real traffic)
+def egress_test():
+    try:
+        cfg = json.load(open(WG_EASY_CONFIG))
+        cl = next((c for c in cfg.get("clients", {}).values()
+                   if c.get("name") == HEALTHCHECK_CLIENT), None)
+        srv_pub = cfg.get("server", {}).get("publicKey")
+        if not cl or not srv_pub:
+            flag(f"healthcheck client '{HEALTHCHECK_CLIENT}' missing from wg-easy "
+                 "(create one so the egress test can run)")
+            return
+        cl_key, cl_addr = cl["privateKey"], cl["address"]
+    except Exception as e:
+        flag(f"cannot read wg-easy config for egress test: {str(e)[:80]}")
+        return
+
+    # expected egress IP: container WG_HOST env, else explicit env override
+    expected = os.environ.get("EXPECTED_EGRESS_IP")
+    if not expected:
+        r = sh(f"docker inspect {CONTAINER} --format "
+               "'{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null")
+        for line in r.stdout.splitlines():
+            if line.startswith("WG_HOST="):
+                expected = line.split("=", 1)[1].strip()
+                break
+
+    sh(f"ip netns del {TEST_NS} 2>/dev/null; ip link del vh0 2>/dev/null; "
+       f"ip netns add {TEST_NS}; ip link add vh0 type veth peer name vh1; "
+       f"ip link set vh1 netns {TEST_NS}; ip addr add {TEST_HOST_IP}/24 dev vh0; "
+       f"ip link set vh0 up")
+    r = sh(f"""ip netns exec {TEST_NS} bash -c '
+ip link set lo up
+ip addr add {TEST_CLIENT_IP}/24 dev vh1
+ip link set vh1 up
+ip link add wg0 type wireguard
+wg set wg0 private-key /dev/stdin <<< "{cl_key}"
+wg set wg0 peer {srv_pub} preshared-key /dev/stdin <<< "{cl['preSharedKey']}"
+wg set wg0 peer {srv_pub} endpoint {TEST_HOST_IP}:{WG_PORT} allowed-ips 0.0.0.0/0 persistent-keepalive 25
+ip addr add {cl_addr}/24 dev wg0
+ip link set wg0 up
+ip route add default dev wg0'""", timeout=20)
+    if r.returncode != 0:
+        flag(f"egress test: netns client setup failed: {r.stderr.strip()[:100]}")
+        return
+    time.sleep(1.5)
+    try:
+        r = sh(f"ip netns exec {TEST_NS} ping -c 2 -W 3 1.1.1.1", timeout=15)
+        if r.returncode != 0 or "0% packet loss" not in r.stdout:
+            flag("egress test: ICMP through tunnel FAILED — forwarding/NAT broken")
+        if expected:
+            r = sh(f"ip netns exec {TEST_NS} curl -s -m 10 "
+                   "https://1.1.1.1/cdn-cgi/trace", timeout=15)
+            if f"ip={expected}" not in r.stdout:
+                flag(f"egress test: wrong egress IP (expected {expected}, "
+                     f"got {r.stdout.strip()[:60] or 'no answer'})")
+    finally:
+        sh(f"ip netns del {TEST_NS} 2>/dev/null; ip link del vh0 2>/dev/null")
+
+
+if os.path.exists(LOCK) and time.time() - os.path.getmtime(LOCK) < 90:
+    pass  # another instance mid-run; skip the egress test this tick
+else:
+    try:
+        open(LOCK, "w").close()
+        egress_test()
+    finally:
+        try:
+            os.remove(LOCK)
+        except OSError:
+            pass
+
 if flags:
     print(f"VPN HEALTH CHECK FAILED — {len(flags)} issue(s)")
     for f in flags:
         print(f"FLAG: {f}")
     sys.exit(1)
-# healthy: print nothing
 sys.exit(0)

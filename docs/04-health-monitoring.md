@@ -27,12 +27,25 @@ playbook): `WG_SUBNET=10.66.66.0/24`, `WG_IF=wg0`, `WG_PORT=51820`,
 
 Checks (each failure prints a `FLAG:` line):
 
-1. wg-easy container running + healthy
+1. wg-easy container running + healthy ("starting" warmup is not a flag)
 2. wg0 interface up, port 51820/udp listening
 3. nft rules present: MASQUERADE, 2x FORWARD accept, UI-port public block
 4. AdGuard unit active + answering on the tunnel IP
 5. Ad blocking still effective (test domain resolves to 0.0.0.0)
 6. `wg-nft-rules.service` enabled (survives reboot)
+7. Dashboard unit active + HTTP 200 on the tunnel IP
+8. **Peer endpoint sanity** — any real device peer showing a private/test
+   endpoint means a stale test rig or dead client is holding its tunnel slot
+   (this is the failure where a phone shows "connected" but has no internet).
+   The dedicated healthcheck peer is exempt (it legitimately uses the test IP).
+9. **Active egress test** — every run spins a throwaway WireGuard client in a
+   netns using the dedicated `healthcheck` peer's key and proves real traffic:
+   handshake → ICMP to 1.1.1.1 → HTTPS egress with the server's public IP.
+   Catches forwarding/NAT/routing breakage that presence checks miss.
+
+Setup requirement: create the healthcheck peer once —
+`bash /root/wg-easy/add-wg-profile.sh healthcheck` (its key lives in the
+wg-easy volume; the script reads it from wg0.json).
 
 Exit 0 when clean (silent — nothing delivered). Non-zero + FLAG lines when
 broken (delivered as the alert).
