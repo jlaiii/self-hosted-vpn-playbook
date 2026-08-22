@@ -134,7 +134,9 @@ else:
         flag(f"dashboard not responding at {DASH_URL} (HTTP {r.stdout.strip() or 'timeout'})")
 
 # 8. peer endpoint sanity (RFC1918/link-local/loopback endpoints = impostor)
-#    The healthcheck peer legitimately uses the test veth IP — exempt it.
+#    The healthcheck peer and documented test rig ranges are exempt — they
+#    legitimately use test IPs. Set EP_EXCLUDE_NETS to override.
+ep_exclude = os.environ.get("EP_EXCLUDE_NETS", "10.88.88.0/24,10.99.99.0/24").split(",")
 hc_pubkey = None
 try:
     cfg8 = json.load(open(WG_EASY_CONFIG))
@@ -155,6 +157,8 @@ for line in r.stdout.strip().splitlines()[1:]:
     try:
         a = ipaddress.ip_address(ip)
     except ValueError:
+        continue
+    if any(a in ipaddress.ip_network(n) for n in ep_exclude):
         continue
     if a.is_private or a.is_loopback or a.is_link_local:
         flag(f"peer {parts[0][:10]}… has private/test endpoint {ep} — "

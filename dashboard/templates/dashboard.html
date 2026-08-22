@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0e14">
+<title>VPS Dashboard — Dallas</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2' y='3' width='20' height='14' rx='2' fill='none' stroke='%234da6ff' stroke-width='2'/%3E%3Cline x1='8' y1='21' x2='16' y2='21' stroke='%234da6ff' stroke-width='2'/%3E%3Cline x1='12' y1='17' x2='12' y2='21' stroke='%234da6ff' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+:root {
+    --bg-primary: #0a0e14; --bg-secondary: #111620; --bg-card: #151b27;
+    --bg-elevated: #1a2233; --bg-hover: #1e2740;
+    --border: #1e2a3a; --border-light: #253045;
+    --text-primary: #e6edf3; --text-secondary: #8b9ab5; --text-muted: #5a6a85;
+    --accent-blue: #4da6ff; --accent-red: #f85149; --accent-yellow: #e3b341;
+    --accent-green: #3fb950; --accent-purple: #a78bfa; --accent-orange: #f0883e;
+    --accent-red-dim: #3d1a1a; --accent-yellow-dim: #3d3018;
+    --accent-green-dim: #1a3d24; --accent-blue-dim: #1a3a5c;
+    --accent-purple-dim: #2a1f4e; --accent-orange-dim: #3d2510;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg-primary);
+    background-image: radial-gradient(ellipse at 50% 0%, rgba(77,166,255,0.04) 0%, transparent 60%);
+    color: var(--text-primary);
+    min-height: 100vh;
+    padding-bottom: calc(env(safe-area-inset-bottom) + 24px);
+    transition: background 0.3s, color 0.3s;
+}
+.mono { font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; }
+
+header { padding: 18px 16px 0; max-width: 1100px; margin: 0 auto; }
+.toprow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand svg { width: 26px; height: 26px; stroke: var(--accent-blue); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.brand h1 { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; }
+.brand .sub { font-size: 0.72rem; color: var(--text-muted); font-weight: 500; }
+.live-pill { display: inline-flex; align-items: center; gap: 7px; font-size: 0.72rem; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border); padding: 6px 12px; border-radius: 999px; white-space: nowrap; }
+.status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); animation: pulse 2s ease-in-out infinite; box-shadow: 0 0 6px rgba(63,185,80,0.4); }
+.status-dot.bad { background: var(--accent-red); box-shadow: 0 0 6px rgba(248,81,73,0.5); animation: none; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+nav.tabs {
+    display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    margin: 16px -16px 0; padding: 0 16px 8px; scrollbar-width: none;
+}
+nav.tabs::-webkit-scrollbar { display: none; }
+.tab-btn {
+    flex: 0 0 auto; min-height: 48px; padding: 10px 18px;
+    background: var(--bg-card); border: 1px solid var(--border); color: var(--text-secondary);
+    border-radius: 10px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+    transition: border-color 0.2s, color 0.2s, background 0.2s;
+    display: inline-flex; align-items: center; gap: 8px;
+}
+.tab-btn svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tab-btn.active { background: var(--bg-elevated); border-color: var(--accent-blue); color: var(--text-primary); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+main { max-width: 1100px; margin: 0 auto; padding: 10px 16px 0; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.stat-card {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 16px; position: relative; overflow: hidden;
+}
+.stat-card .label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 8px; }
+.stat-card .value { font-size: 1.45rem; font-weight: 700; letter-spacing: -0.02em; }
+.stat-card .meta { font-size: 0.72rem; color: var(--text-secondary); margin-top: 6px; }
+.bar-wrap { margin-top: 10px; height: 6px; background: var(--bg-elevated); border-radius: 999px; overflow: hidden; }
+.bar { height: 100%; border-radius: 999px; background: var(--accent-blue); transition: width 0.8s ease; }
+.bar.green { background: var(--accent-green); }
+.bar.yellow { background: var(--accent-yellow); }
+.bar.red { background: var(--accent-red); }
+.bar.purple { background: var(--accent-purple); }
+
+.section { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; margin-top: 12px; }
+.section h2 { display: flex; align-items: center; gap: 8px; font-size: 0.95rem; font-weight: 700; margin-bottom: 14px; }
+.section h2 svg { width: 16px; height: 16px; stroke: var(--text-muted); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.section .h2right { margin-left: auto; font-size: 0.72rem; color: var(--text-muted); font-weight: 500; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+th { text-align: left; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 10px; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+tr:last-child td { border-bottom: none; }
+td:first-child { color: var(--text-primary); font-weight: 600; }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+.tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 8px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+.tag-green { background: var(--accent-green-dim); color: var(--accent-green); }
+.tag-red { background: var(--accent-red-dim); color: var(--accent-red); }
+.tag-blue { background: var(--accent-blue-dim); color: var(--accent-blue); }
+.tag-gray { background: var(--bg-elevated); color: var(--text-muted); }
+.tag-yellow { background: var(--accent-yellow-dim); color: var(--accent-yellow); }
+.tag .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+.link-btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 52px; padding: 12px 16px; border-radius: 12px; text-decoration: none;
+    background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary);
+    font-size: 0.85rem; font-weight: 600; margin-top: 10px; transition: border-color 0.2s;
+}
+.link-btn:active { border-color: var(--accent-blue); }
+.link-btn svg { width: 16px; height: 16px; stroke: var(--accent-blue); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.link-btn .hint { margin-left: auto; font-size: 0.72rem; color: var(--text-muted); font-weight: 500; }
+
+.btn {
+    min-height: 52px; padding: 12px 22px; border-radius: 12px; border: 1px solid var(--accent-blue);
+    background: var(--accent-blue); color: #04101f; font-size: 0.9rem; font-weight: 700;
+    cursor: pointer; width: 100%; transition: opacity 0.2s;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:active:not(:disabled) { opacity: 0.8; }
+
+.sp-test-card { text-align: center; padding: 8px 0 4px; }
+.sp-big { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
+.sp-item { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 14px 8px; }
+.sp-item .v { font-size: 1.25rem; font-weight: 700; }
+.sp-item .l { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-top: 4px; }
+.sp-status { margin-top: 12px; font-size: 0.8rem; color: var(--text-secondary); min-height: 1.2em; }
+.spin {
+    display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border-light);
+    border-top-color: var(--accent-blue); border-radius: 50%; animation: rot 0.8s linear infinite;
+    vertical-align: -3px; margin-right: 6px;
+}
+@keyframes rot { to { transform: rotate(360deg); } }
+
+.grid2 { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 720px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+
+.footer-note { margin-top: 18px; text-align: center; font-size: 0.7rem; color: var(--text-muted); }
+.error-banner {
+    display: none; max-width: 1100px; margin: 10px auto 0; padding: 14px 16px;
+    background: var(--accent-red-dim); border: 1px solid var(--accent-red);
+    color: var(--accent-red); border-radius: 12px; font-size: 0.82rem; font-weight: 600;
+    align-items: center; gap: 10px;
+}
+.error-banner.visible { display: flex; }
+.error-banner .retry-btn {
+    margin-left: auto; flex: 0 0 auto; min-height: 40px; padding: 6px 16px;
+    background: var(--accent-red); color: #fff; border: none; border-radius: 8px;
+    font-size: 0.8rem; font-weight: 700; cursor: pointer;
+}
+.lastok { color: var(--text-muted); font-size: 0.7rem; font-weight: 500; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.tab-panel.active > * { animation: fadeIn 0.3s ease both; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="toprow">
+    <div class="brand">
+      <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      <div>
+        <h1>VPS Dashboard</h1>
+        <div class="sub">Dallas — 65.75.202.18</div>
+      </div>
+    </div>
+    <div class="live-pill"><span class="status-dot" id="liveDot"></span><span id="liveText">updating…</span></div>
+  </div>
+  <nav class="tabs" id="tabNav">
+    <button class="tab-btn active" data-tab="overview"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Overview</button>
+    <button class="tab-btn" data-tab="vpn"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>VPN</button>
+    <button class="tab-btn" data-tab="services"><svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>Services</button>
+    <button class="tab-btn" data-tab="speedtest"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Speed Test</button>
+    <button class="tab-btn" data-tab="system"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>System</button>
+  </nav>
+</header>
+
+<div class="error-banner" id="errBanner">
+  <span id="errText">Can't reach the server.</span>
+  <button class="retry-btn" onclick="location.reload()">Retry</button>
+</div>
+
+<main>
+  <!-- OVERVIEW -->
+  <section class="tab-panel active" id="panel-overview">
+    <div class="cards">
+      <div class="stat-card">
+        <div class="label">CPU</div>
+        <div class="value" id="cpuPct">–</div>
+        <div class="meta" id="cpuMeta">–</div>
+        <div class="bar-wrap"><div class="bar" id="cpuBar"></div></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Memory</div>
+        <div class="value" id="memPct">–</div>
+        <div class="meta" id="memMeta">–</div>
+        <div class="bar-wrap"><div class="bar purple" id="memBar"></div></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Network</div>
+        <div class="value" style="font-size:1rem;" id="netRates">–</div>
+        <div class="meta" id="netMeta">–</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Uptime</div>
+        <div class="value" style="font-size:1.1rem;" id="uptimeVal">–</div>
+        <div class="meta" id="bootMeta">–</div>
+      </div>
+    </div>
+    <div class="section">
+      <h2><svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>Disk</h2>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Mount</th><th>Used / Total</th><th>Use</th><th></th></tr></thead>
+        <tbody id="diskRows"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- VPN -->
+  <section class="tab-panel" id="panel-vpn">
+    <div class="cards">
+      <div class="stat-card">
+        <div class="label">Tunnel</div>
+        <div class="value" style="font-size:1.1rem;" id="wgState">–</div>
+        <div class="meta">wg0 · UDP 51820</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Ad Blocker</div>
+        <div class="value" style="font-size:1.1rem;" id="aghState">–</div>
+        <div class="meta">DNS 10.66.66.1</div>
+      </div>
+    </div>
+    <div class="section">
+      <h2><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Devices</h2>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Device</th><th>Last handshake</th><th>Received</th><th>Sent</th><th>Status</th></tr></thead>
+        <tbody id="peerRows"></tbody>
+      </table></div>
+    </div>
+    <a class="link-btn" href="http://10.66.66.1:51821"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>wg-easy Dashboard — add or remove VPN devices<span class="hint">10.66.66.1:51821</span></a>
+    <a class="link-btn" href="http://10.66.66.1:3000"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>AdGuard Home — query log and blocklists<span class="hint">10.66.66.1:3000</span></a>
+  </section>
+
+  <!-- SERVICES -->
+  <section class="tab-panel" id="panel-services">
+    <div class="section">
+      <h2><svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>Docker Containers</h2>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Container</th><th>CPU</th><th>Mem</th><th>Net I/O</th><th>PIDs</th></tr></thead>
+        <tbody id="containerRows"></tbody>
+      </table></div>
+    </div>
+    <div class="section">
+      <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Systemd Units</h2>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Unit</th><th>State</th></tr></thead>
+        <tbody id="unitRows"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- SPEED TEST -->
+  <section class="tab-panel" id="panel-speedtest">
+    <div class="section sp-test-card">
+      <h2><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Speed Test — Ookla, nearest server</h2>
+      <button class="btn" id="spBtn">Run Speed Test</button>
+      <div class="sp-status" id="spStatus"></div>
+      <div class="sp-big">
+        <div class="sp-item"><div class="v" id="spPing">–</div><div class="l">Ping ms</div></div>
+        <div class="sp-item"><div class="v" id="spDown">–</div><div class="l">Download</div></div>
+        <div class="sp-item"><div class="v" id="spUp">–</div><div class="l">Upload</div></div>
+      </div>
+      <div class="meta" style="margin-top:10px;font-size:0.78rem;color:var(--text-muted);" id="spServer"></div>
+    </div>
+    <div class="section">
+      <h2><svg viewBox="0 0 24 24"><polyline points="12 8 12 12 16 14"/><circle cx="12" cy="12" r="10"/></svg>History <span class="h2right" id="spAvg"></span></h2>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Time</th><th>Ping</th><th>Jitter</th><th>Down</th><th>Up</th><th>Server</th></tr></thead>
+        <tbody id="spHistory"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- SYSTEM -->
+  <section class="tab-panel" id="panel-system">
+    <div class="grid2">
+      <div class="section">
+        <h2><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>System</h2>
+        <div class="table-scroll"><table>
+          <tbody id="sysRows"></tbody>
+        </table></div>
+      </div>
+      <div class="section">
+        <h2><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Top Processes</h2>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Process</th><th>CPU %</th><th>Mem %</th></tr></thead>
+          <tbody id="procRows"></tbody>
+        </table></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="footer-note">Tunnel-only access · auto-refresh 5s · data never leaves this server</div>
+</main>
+
+<script>
+function fmtBytes(n) {
+  if (n === null || n === undefined) return '–';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n/1048576).toFixed(1) + ' MB';
+  if (n < 1099511627776) return (n/1073741824).toFixed(2) + ' GB';
+  return (n/1099511627776).toFixed(2) + ' TB';
+}
+function fmtRate(n) { return fmtBytes(n) + '/s'; }
+function fmtUptime(sec) {
+  if (!sec) return '–';
+  var d = Math.floor(sec/86400), h = Math.floor(sec%86400/3600), m = Math.floor(sec%3600/60);
+  return d > 0 ? d + 'd ' + h + 'h' : h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+}
+function barColor(p) { return p > 85 ? 'red' : p > 60 ? 'yellow' : 'green'; }
+function esc(s) { return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+// tabs
+document.getElementById('tabNav').addEventListener('click', function(e) {
+  var btn = e.target.closest('.tab-btn'); if (!btn) return;
+  document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.toggle('active', b === btn); });
+  document.querySelectorAll('.tab-panel').forEach(function(p){ p.classList.toggle('active', p.id === 'panel-' + btn.dataset.tab); });
+  if (btn.dataset.tab === 'speedtest') loadSpHistory();
+});
+
+var lastRefresh = Date.now(), pollTimer = null, lastSuccess = null;
+window.onerror = function(msg, src, line) {
+  showError('Script error: ' + msg + ' (line ' + line + ')');
+};
+function showError(msg) {
+  document.getElementById('errText').textContent = msg;
+  document.getElementById('errBanner').classList.add('visible');
+}
+function hideError() {
+  document.getElementById('errBanner').classList.remove('visible');
+}
+function updateDataAge() {
+  var age = Math.floor((Date.now() - lastRefresh)/1000);
+  var base = lastSuccess ? 'ok ' + lastSuccess : (age < 5 ? 'live' : age + 's ago');
+  document.getElementById('liveText').textContent = base;
+}
+updateDataAge();
+setInterval(updateDataAge, 2000);
+
+function renderStats(d) {
+  // overview
+  var cpu = d.cpu || 0;
+  document.getElementById('cpuPct').textContent = cpu.toFixed(0) + '%';
+  document.getElementById('cpuMeta').textContent = d.cores + ' cores · load ' + d.load.map(function(x){return x.toFixed(2);}).join(' / ');
+  document.getElementById('cpuBar').style.width = cpu + '%';
+  document.getElementById('cpuBar').className = 'bar ' + barColor(cpu);
+  document.getElementById('memPct').textContent = d.mem_percent.toFixed(0) + '%';
+  document.getElementById('memMeta').textContent = fmtBytes(d.mem_used) + ' / ' + fmtBytes(d.mem_total) + ' · swap ' + d.swap_percent.toFixed(0) + '%';
+  document.getElementById('memBar').style.width = d.mem_percent + '%';
+  document.getElementById('memBar').className = 'bar purple ' + barColor(d.mem_percent);
+  document.getElementById('netRates').innerHTML = '&#8595; ' + fmtRate(d.net_rx_rate) + '<br>&#8593; ' + fmtRate(d.net_tx_rate);
+  document.getElementById('netMeta').textContent = 'total ↓ ' + fmtBytes(d.net_rx_total) + ' ↑ ' + fmtBytes(d.net_tx_total);
+  var up = (Date.now()/1000) - (d.ts - 2) > 0 ? (Date.now()/1000 - new Date(d.boot.replace(' ','T')+'Z').getTime()/1000) : 0;
+  document.getElementById('uptimeVal').textContent = fmtUptime(up > 0 ? up : 0);
+  document.getElementById('bootMeta').textContent = 'boot ' + d.boot;
+
+  // disk
+  var rows = '';
+  d.disks.forEach(function(dk){
+    rows += '<tr><td class="mono">' + esc(dk.mount) + '</td><td>' + fmtBytes(dk.used) + ' / ' + fmtBytes(dk.total) + '</td><td>' + dk.percent.toFixed(0) + '%</td>' +
+      '<td style="width:35%;"><div class="bar-wrap" style="margin-top:0;"><div class="bar ' + barColor(dk.percent) + '" style="width:' + dk.percent + '%"></div></div></td></tr>';
+  });
+  document.getElementById('diskRows').innerHTML = rows;
+
+  // vpn
+  var wg = d.wg || {};
+  document.getElementById('wgState').textContent = wg.up ? 'Up' : 'Down';
+  document.getElementById('wgState').style.color = wg.up ? 'var(--accent-green)' : 'var(--accent-red)';
+  var agh = d.units ? d.units.filter(function(u){return u.unit==='adguardhome';})[0] : null;
+  var aghOn = agh && agh.active === 'active';
+  document.getElementById('aghState').textContent = aghOn ? 'Active' : (agh ? agh.active : 'unknown');
+  document.getElementById('aghState').style.color = aghOn ? 'var(--accent-green)' : 'var(--accent-red)';
+  var prows = '';
+  (wg.peers || []).forEach(function(p){
+    var tag = p.connected
+      ? '<span class="tag tag-green"><span class="dot"></span>Connected</span>'
+      : '<span class="tag tag-gray"><span class="dot"></span>' + esc(p.handshake) + '</span>';
+    prows += '<tr><td>' + esc(p.name) + '</td><td class="mono">' + esc(p.handshake) + '</td><td>' + fmtBytes(p.rx) + '</td><td>' + fmtBytes(p.tx) + '</td><td>' + tag + '</td></tr>';
+  });
+  if (!(wg.peers || []).length) prows = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No devices configured</td></tr>';
+  document.getElementById('peerRows').innerHTML = prows;
+
+  // services
+  var crows = '';
+  (d.containers || []).forEach(function(c){
+    crows += '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.cpu) + '%</td><td>' + esc(c.mem) + '% (' + esc(c.mem_used) + ')</td><td class="mono">' + esc(c.net) + '</td><td>' + esc(c.pids) + '</td></tr>';
+  });
+  if (!(d.containers || []).length) crows = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No containers</td></tr>';
+  document.getElementById('containerRows').innerHTML = crows;
+  var urows = '';
+  (d.units || []).forEach(function(u){
+    var ok = u.active === 'active';
+    urows += '<tr><td class="mono">' + esc(u.unit) + '</td><td><span class="tag ' + (ok ? 'tag-green' : 'tag-red') + '"><span class="dot"></span>' + esc(u.active) + '</span></td></tr>';
+  });
+  document.getElementById('unitRows').innerHTML = urows;
+
+  // system
+  document.getElementById('sysRows').innerHTML =
+    '<tr><td>OS</td><td class="mono">' + esc(d.os || '—') + '</td></tr>' +
+    '<tr><td>Kernel</td><td class="mono">' + esc(d.kernel || '—') + '</td></tr>' +
+    '<tr><td>CPU</td><td>' + esc(d.cpu_model) + '</td></tr>' +
+    '<tr><td>Memory</td><td>' + fmtBytes(d.mem_total) + '</td></tr>' +
+    '<tr><td>Uptime</td><td>' + fmtUptime(up) + '</td></tr>' +
+    '<tr><td>fail2ban sshd</td><td class="mono">' + esc(d.f2b || 'n/a') + ' banned</td></tr>';
+  var prrows = '';
+  (d.procs || []).forEach(function(p){
+    prrows += '<tr><td class="mono">' + esc(p.name) + ' <span style="color:var(--text-muted);">(' + p.pid + ')</span></td><td>' + p.cpu + '%</td><td>' + p.mem + '%</td></tr>';
+  });
+  document.getElementById('procRows').innerHTML = prrows || '<tr><td colspan="3">–</td></tr>';
+
+  lastRefresh = Date.now();
+  updateDataAge();
+}
+
+function loadStats() {
+  fetch('/api/stats?t=' + Date.now()).then(function(r){
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(function(d){
+    try {
+      renderStats(d);
+      hideError();
+      lastSuccess = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+      var ok = d.speedtest_running !== true;
+      document.getElementById('liveDot').className = 'status-dot' + (ok ? '' : ' bad');
+    } catch (e) {
+      showError('Render failed: ' + e.message);
+    }
+  }).catch(function(e){
+    document.getElementById('liveDot').className = 'status-dot bad';
+    if (!navigator.onLine) {
+      showError('No network. If the VPN is off, this dashboard is unreachable — turn the tunnel on, then retry.');
+    } else {
+      showError('Can\'t reach the dashboard server — is the VPN connected? (' + e.message + ')');
+    }
+  });
+}
+loadStats();
+setInterval(loadStats, 5000);
+
+// speedtest
+var spPoll = null;
+function loadSpHistory() {
+  fetch('/api/speedtest/history').then(function(r){ return r.json(); }).then(function(d){
+    var rows = '';
+    (d.history || []).slice().reverse().forEach(function(h){
+      if (h.error) { rows += '<tr><td class="mono">' + esc(h.ts) + '</td><td colspan="5" class="tag-red">failed</td></tr>'; return; }
+      rows += '<tr><td class="mono">' + esc(h.ts) + '</td><td>' + h.ping + '</td><td>' + h.jitter + '</td><td>' + h.down_mbps + ' Mbps</td><td>' + h.up_mbps + ' Mbps</td><td style="max-width:180px;">' + esc(h.server) + '</td></tr>';
+    });
+    if (!(d.history || []).length) rows = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No runs yet</td></tr>';
+    document.getElementById('spHistory').innerHTML = rows;
+    document.getElementById('spAvg').textContent = d.avg
+      ? 'avg ' + d.avg.runs + ' runs: ↓ ' + d.avg.down + ' · ↑ ' + d.avg.up + ' Mbps · ' + d.avg.ping + ' ms'
+      : '';
+  });
+}
+document.getElementById('spBtn').addEventListener('click', function(){
+  var btn = this;
+  btn.disabled = true;
+  document.getElementById('spStatus').innerHTML = '<span class="spin"></span>Starting…';
+  fetch('/api/speedtest', {method:'POST'}).then(function(r){
+    if (r.status === 409) { document.getElementById('spStatus').textContent = 'A test is already running.'; return; }
+    return r.json();
+  }).then(function(){
+    spPoll = setInterval(function(){
+      fetch('/api/speedtest/status').then(function(r){ return r.json(); }).then(function(s){
+        if (s.running) {
+          document.getElementById('spStatus').innerHTML = '<span class="spin"></span>Testing… ~30s';
+        } else if (s.result) {
+          clearInterval(spPoll);
+          var res = s.result;
+          document.getElementById('spStatus').textContent = res.error ? 'Test failed.' : 'Complete.';
+          if (!res.error) {
+            document.getElementById('spPing').textContent = res.ping;
+            document.getElementById('spDown').textContent = res.down_mbps + ' Mbps';
+            document.getElementById('spUp').textContent = res.up_mbps + ' Mbps';
+            document.getElementById('spServer').textContent = 'Server: ' + res.server;
+          }
+          btn.disabled = false;
+          loadSpHistory();
+        }
+      });
+    }, 2000);
+  });
+});
+loadSpHistory();
+</script>
+</body>
+</html>
