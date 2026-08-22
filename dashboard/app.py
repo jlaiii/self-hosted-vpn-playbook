@@ -32,6 +32,26 @@ WG_EASY_CONFIG = os.environ.get(
 CACHE = {}
 _cache_lock = threading.Lock()
 _net_last = None
+SNAPSHOT_FILE = os.path.join(DATA_DIR, "stats-cache.json")
+SLOW_EVERY_S = 15  # containers/units/wg/f2b refresh cadence
+_slow_last = {"ts": 0.0, "data": {"containers": [], "units": [],
+                                  "wg": {"up": False, "peers": []}, "f2b": "n/a"}}
+_slow_lock = threading.Lock()
+
+
+def _load_persisted():
+    """Warm the cache from disk so the first request is instant after restart."""
+    try:
+        with open(SNAPSHOT_FILE) as f:
+            snap = json.load(f)
+            if snap.get("ts"):
+                return snap
+    except Exception:
+        pass
+    return {}
+
+
+CACHE.update(_load_persisted())
 
 
 def _bytes_rate():
@@ -119,19 +139,54 @@ def _top_procs():
     return out
 
 
+def _os_info():
+    uname = os.uname()
+    return {"os": f"{uname.sysname} {uname.release}", "kernel": uname.release}
+
+
+def _slow_data():
+    return {
+        "containers": docker_containers(),
+        "units": key_units(),
+        "wg": wg_peers(),
+        "f2b": f2b_bans(),
+    }
+
+
+def refresh(force_slow=False):
+    """Compute a full snapshot and swap it into CACHE + disk (atomic)."""
+    snap = _sample()
+    snap.update(_os_info())
+    with _slow_lock:
+        if force_slow or time.time() - _slow_last["ts"] >= SLOW_EVERY_S:
+            try:
+                _slow_last["data"] = _slow_data()
+                _slow_last["ts"] = time.time()
+            except Exception:
+                pass
+        snap.update(_slow_last["data"])
+    snap["speedtest_running"] = speedtest_running()
+    with _cache_lock:
+        CACHE.clear()
+        CACHE.update(snap)
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = SNAPSHOT_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(snap, f)
+        os.replace(tmp, SNAPSHOT_FILE)
+    except Exception:
+        pass
+    return snap
+
+
 def sampler_loop():
     while True:
         try:
-            snap = _sample()
-            with _cache_lock:
-                CACHE.clear()
-                CACHE.update(snap)
+            refresh()
         except Exception:
             pass
-        time.sleep(2)
-
-
-threading.Thread(target=sampler_loop, daemon=True).start()
+        time.sleep(5)
 
 # ------------------------------------------------------------- containers ---
 def docker_containers():
@@ -244,21 +299,18 @@ def no_cache(resp):
 
 @app.route("/")
 def index():
-    return render_template("dashboard.html")
+    with _cache_lock:
+        snap = dict(CACHE)
+    preload = json.dumps(snap if snap.get("ts") else None).replace("<", "\\u003c")
+    return render_template("dashboard.html", preload=preload)
 
 
 @app.route("/api/stats")
 def api_stats():
     with _cache_lock:
         snap = dict(CACHE)
-    uname = os.uname()
-    snap["os"] = f"{uname.sysname} {uname.release}"
-    snap["kernel"] = uname.release
-    snap["containers"] = docker_containers()
-    snap["units"] = key_units()
-    snap["wg"] = wg_peers()
-    snap["f2b"] = f2b_bans()
-    snap["speedtest_running"] = speedtest_running()
+    if not snap.get("ts") or request.args.get("refresh") == "1":
+        snap = refresh(force_slow=True)
     return jsonify(snap)
 
 
@@ -301,6 +353,10 @@ def _run_speedtest():
     with open(HISTORY_FILE, "w") as f:
         json.dump(history, f)
     _st_running = False
+    try:
+        refresh(force_slow=True)  # snapshot picks up the new result
+    except Exception:
+        pass
 
 
 def load_history():
@@ -344,4 +400,5 @@ def api_speedtest_history():
 
 
 if __name__ == "__main__":
+    threading.Thread(target=sampler_loop, daemon=True).start()
     app.run(host=BIND_HOST, port=BIND_PORT, threaded=True)

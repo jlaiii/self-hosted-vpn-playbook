@@ -298,6 +298,7 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
   <div class="footer-note">Tunnel-only access · auto-refresh 5s · data never leaves this server</div>
 </main>
 
+<script>window.PRELOAD = {{ preload | safe }};</script>
 <script>
 function fmtBytes(n) {
   if (n === null || n === undefined) return '–';
@@ -440,6 +441,18 @@ function loadStats() {
       showError('Can\'t reach the dashboard server — is the VPN connected? (' + e.message + ')');
     }
   });
+}
+// instant first paint: render the server-preloaded snapshot immediately,
+// then let the 5s poller stream in fresh data (no refresh needed)
+if (window.PRELOAD && window.PRELOAD.ts) {
+  try {
+    renderStats(window.PRELOAD);
+    lastRefresh = window.PRELOAD.ts * 1000;
+    updateDataAge();
+    hideError();
+  } catch (e) {
+    showError('Render failed: ' + e.message);
+  }
 }
 loadStats();
 setInterval(loadStats, 5000);
