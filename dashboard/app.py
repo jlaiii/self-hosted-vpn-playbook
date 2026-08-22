@@ -802,9 +802,17 @@ def api_logs_agh_toggle():
 @app.route("/api/logs/docker")
 def api_logs_docker():
     lines = min(int(request.args.get("lines", 100)), 500)
-    r = subprocess.run(["docker", "logs", "--tail", str(lines), "wg-easy"],
-                       capture_output=True, text=True, timeout=15)
-    return jsonify({"log": r.stdout[-20000:] + r.stderr[-2000:]})
+    try:
+        r = subprocess.run(["timeout", "12", "docker", "logs", "--tail",
+                            str(lines), "wg-easy"],
+                           capture_output=True, text=True, timeout=15)
+        out = r.stdout
+        if r.returncode != 0:
+            return jsonify({"log": "(log unavailable — " +
+                            (r.stderr.strip()[:80] or "timeout") + ")"})
+    except Exception as e:
+        return jsonify({"log": "(log unavailable — " + str(e)[:80] + ")"})
+    return jsonify({"log": out[-20000:]})
 
 
 @app.route("/api/logs/top")
@@ -870,14 +878,14 @@ def api_logs_clear():
         r, code = _agh_api("POST", "/control/querylog_clear")
         result["agh"] = code in (200, 204) or r is None
     if scope in ("docker", "all"):
+        # truncating a docker json log in place breaks the daemon's reader
+        # (docker logs hangs / returns nothing) — restart instead: the
+        # container starts with a fresh log file. ~10s tunnel pause.
         try:
-            path = subprocess.run(
-                ["docker", "inspect", "-f", "{{.LogPath}}", "wg-easy"],
-                capture_output=True, text=True, timeout=10).stdout.strip()
-            if path:
-                with open(path, "w") as f:
-                    f.truncate(0)
-                result["docker"] = True
+            r = subprocess.run(["timeout", "30", "docker", "restart",
+                                "wg-easy"], capture_output=True, text=True,
+                               timeout=35)
+            result["docker"] = r.returncode == 0
         except Exception:
             pass
     return jsonify({"ok": True, "result": result})

@@ -344,7 +344,7 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
         <div class="log-btns">
           <button class="btn" onclick="clearLogs('agh')">Clear DNS Logs</button>
           <button class="btn" onclick="loadDockerLog()">Show Server Log</button>
-          <button class="btn" onclick="clearLogs('docker')">Clear Server Log</button>
+          <button class="btn" onclick="clearLogs('docker')">Clear Server Log (restarts VPN container)</button>
         </div>
         <pre id="dockerLog" class="log-pre" style="display:none;"></pre>
       </div>
@@ -763,7 +763,7 @@ function toggleAghLog(on) {
     });
 }
 function clearLogs(scope) {
-  var labels = {agh: 'Clear all DNS query logs?', docker: 'Clear the server log?'};
+  var labels = {agh: 'Clear all DNS query logs?', docker: 'Clear the server log? This restarts the VPN container (~10 second tunnel pause) and starts a fresh log.'};
   if (!confirm(labels[scope] || 'Clear logs?')) return;
   fetch('/api/logs/clear', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({scope: scope})})
     .then(function(){ loadLogs(); if (scope === 'docker') { document.getElementById('dockerLog').style.display = 'none'; } });
@@ -774,7 +774,8 @@ function loadDockerLog() {
   pre.style.display = 'block'; pre.textContent = 'loading…';
   fetch('/api/logs/docker?lines=150').then(function(r){ return r.json(); }).then(function(d){
     pre.textContent = d.log || '(empty)';
-  });
+    pre.scrollTop = pre.scrollHeight;
+  }).catch(function(){ pre.textContent = 'failed to load — try again'; });
 }
 
 // speedtest
