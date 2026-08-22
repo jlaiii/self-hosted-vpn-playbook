@@ -314,7 +314,402 @@ def api_stats():
     return jsonify(snap)
 
 
-# ----------------------------------------------------------------- speedtest ---
+# ------------------------------------------------- device / logging mgmt ----
+import http.cookiejar
+import urllib.request as _ur
+
+WG_EASY_URL = os.environ.get("VPS_DASH_WGEASY_URL", "http://localhost:51821")
+AGH_URL = os.environ.get("VPS_DASH_AGH_URL", "http://10.66.66.1:3000")
+_wge_cookies = http.cookiejar.CookieJar()
+_wge_cookie_lock = threading.Lock()
+_agh_cookies = http.cookiejar.CookieJar()
+_agh_cookie_lock = threading.Lock()
+
+
+def _read_cred(path, key="password"):
+    try:
+        for line in open(path):
+            if line.strip().lower().startswith(key):
+                return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _wge_pw():
+    return os.environ.get("VPS_DASH_WGEASY_PASSWORD") or \
+        _read_cred("/root/wg-easy/.ui-creds.txt")
+
+
+def _wge_api(method, path, json_body=None, retry=True):
+    with _wge_cookie_lock:
+        import urllib.request
+        if not _wge_cookies:
+            data = json.dumps({"password": _wge_pw()}).encode()
+            req = urllib.request.Request(f"{WG_EASY_URL}/api/session", data=data,
+                                         headers={"Content-Type": "application/json"},
+                                         method="POST")
+            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_wge_cookies))
+            try:
+                opener.open(req, timeout=8).read()
+            except Exception:
+                pass
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_wge_cookies))
+        body = json.dumps(json_body).encode() if json_body is not None else None
+        headers = {"Content-Type": "application/json"} if body else {}
+        req = urllib.request.Request(f"{WG_EASY_URL}{path}", data=body,
+                                     headers=headers, method=method)
+        try:
+            resp = opener.open(req, timeout=15)
+            code, raw = resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            code, raw = e.code, e.read()
+            if code == 401 and retry:
+                _wge_cookies.clear()
+                return _wge_api(method, path, json_body, retry=False)
+        except Exception:
+            return {"error": "wg-easy unreachable"}, 502
+    try:
+        return (json.loads(raw), code) if raw else (None, code)
+    except Exception:
+        return (raw.decode(errors="replace"), code)
+
+
+def _agh_api(method, path, json_body=None, retry=True):
+    with _agh_cookie_lock:
+        import urllib.request
+        if not _agh_cookies:
+            name = os.environ.get("VPS_DASH_AGH_USER", "jay")
+            pw = os.environ.get("VPS_DASH_AGH_PASSWORD") or \
+                _read_cred("/opt/AdGuardHome/.admin-creds.txt")
+            data = json.dumps({"name": name, "password": pw}).encode()
+            req = urllib.request.Request(f"{AGH_URL}/control/login", data=data,
+                                         headers={"Content-Type": "application/json"},
+                                         method="POST")
+            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_agh_cookies))
+            try:
+                opener.open(req, timeout=8).read()
+            except Exception:
+                pass
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_agh_cookies))
+        body = json.dumps(json_body).encode() if json_body is not None else None
+        headers = {"Content-Type": "application/json"} if body else {}
+        req = urllib.request.Request(f"{AGH_URL}{path}", data=body,
+                                     headers=headers, method=method)
+        try:
+            resp = opener.open(req, timeout=15)
+            code, raw = resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            code, raw = e.code, e.read()
+            if code == 401 and retry:
+                _agh_cookies.clear()
+                return _agh_api(method, path, json_body, retry=False)
+        except Exception:
+            return {"error": "AdGuard unreachable"}, 502
+    try:
+        return (json.loads(raw), code) if raw else (None, code)
+    except Exception:
+        return (raw.decode(errors="replace"), code)
+
+
+def _wg_conf_stanzas():
+    stanzas = {}
+    try:
+        cur = None
+        for line in open("/root/wg-easy/config/wg0.conf"):
+            s = line.strip()
+            if s == "[Peer]":
+                cur = {}
+            elif s.startswith("[") and s.endswith("]"):
+                cur = None
+            elif cur is not None and "=" in s:
+                k, v = s.split("=", 1)
+                cur[k.strip().lower()] = v.strip()
+            if cur is not None and "publickey" in cur and "allowedips" in cur \
+                    and cur not in stanzas.values():
+                stanzas[cur["publickey"]] = cur
+    except Exception:
+        pass
+    return stanzas
+
+
+@app.route("/api/devices")
+def api_devices():
+    data, code = _wge_api("GET", "/api/wireguard/client")
+    if code != 200 or not isinstance(data, list):
+        return jsonify({"devices": [], "error": "wg-easy API unavailable"})
+    stanzas = _wg_conf_stanzas()
+    devices = []
+    for c in data:
+        d = {
+            "id": c.get("id"),
+            "name": c.get("name"),
+            "address": c.get("address"),
+            "enabled": c.get("enabled"),
+            "handshake": c.get("latestHandshakeAt"),
+            "rx": c.get("transferRx", 0),
+            "tx": c.get("transferTx", 0),
+            "publicKey": c.get("publicKey", ""),
+            "connected": False,
+        }
+        if d["handshake"]:
+            try:
+                age = time.time() - datetime.fromisoformat(
+                    d["handshake"].replace("Z", "+00:00")).timestamp()
+                d["connected"] = age < 180
+            except Exception:
+                pass
+        if c.get("publicKey") in stanzas:
+            d["resettable"] = True
+        devices.append(d)
+    return jsonify({"devices": devices})
+
+
+@app.route("/api/devices", methods=["POST"])
+def api_device_create():
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()[:40]
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    data, code = _wge_api("POST", "/api/wireguard/client", {"name": name})
+    if code != 200 or not isinstance(data, dict) or not data.get("success"):
+        return jsonify({"error": f"create failed ({code}): {data}"}), 500
+    # wg-easy returns only {"success":true} — resolve the new client from the list
+    clients, _ = _wge_api("GET", "/api/wireguard/client")
+    newest = None
+    for c in (clients if isinstance(clients, list) else []):
+        if c.get("name") == name:
+            if newest is None or c.get("createdAt", "") > newest.get("createdAt", ""):
+                newest = c
+    if not newest:
+        return jsonify({"error": "created but not found in list"}), 500
+    return jsonify({"ok": True, "id": newest.get("id"),
+                    "address": newest.get("address"), "name": name})
+
+
+def _device_conf(client_id):
+    data, code = _wge_api("GET", f"/api/wireguard/client/{client_id}/configuration")
+    if code != 200 or not isinstance(data, str):
+        return None
+    conf = data
+    if "MTU" not in conf:
+        conf = conf.replace("[Interface]", "[Interface]", 1)
+        # insert MTU after the Address line
+        lines = conf.splitlines()
+        out, added = [], False
+        for ln in lines:
+            out.append(ln)
+            if not added and ln.strip().startswith("Address"):
+                out.append("MTU = 1280")
+                added = True
+        conf = "\n".join(out)
+    return conf
+
+
+@app.route("/api/devices/<client_id>/config")
+def api_device_config(client_id):
+    conf = _device_conf(client_id)
+    if not conf:
+        return jsonify({"error": "config fetch failed"}), 404
+    return jsonify({"conf": conf})
+
+
+@app.route("/api/devices/<client_id>/config/download")
+def api_device_config_download(client_id):
+    conf = _device_conf(client_id)
+    if not conf:
+        return jsonify({"error": "config fetch failed"}), 404
+    name = "device"
+    for c in (api_devices().get_json().get("devices") or []):
+        if c["id"] == client_id:
+            name = c["name"]
+            break
+    from flask import Response
+    return Response(conf, mimetype="text/plain",
+                    headers={"Content-Disposition":
+                             f"attachment; filename={name}.conf"})
+
+
+@app.route("/api/devices/<client_id>/qrcode")
+def api_device_qrcode(client_id):
+    data, code = _wge_api("GET", f"/api/wireguard/client/{client_id}/qrcode.svg")
+    if code != 200 or not isinstance(data, str) or "<svg" not in data:
+        return jsonify({"error": "qrcode fetch failed"}), 502
+    from flask import Response
+    return Response(data, mimetype="image/svg+xml")
+
+
+@app.route("/api/devices/<client_id>/toggle", methods=["POST"])
+def api_device_toggle(client_id):
+    body = request.get_json(silent=True) or {}
+    enable = bool(body.get("enable"))
+    action = "enable" if enable else "disable"
+    data, code = _wge_api("POST", f"/api/wireguard/client/{client_id}/{action}")
+    return jsonify({"ok": code in (200, 201), "code": code})
+
+
+@app.route("/api/devices/<client_id>/reset", methods=["POST"])
+def api_device_reset(client_id):
+    """Reset a device's transfer counters via syncconf remove/re-add.
+
+    This host's wg build rejects `preshared-key` literals ("fopen" bug), so
+    we reuse wg-easy's own mechanism: wg-quick strip + wg syncconf.
+    """
+    data, _ = _wge_api("GET", "/api/wireguard/client")
+    pub = None
+    for c in (data if isinstance(data, list) else []):
+        if c.get("id") == client_id:
+            pub = c.get("publicKey")
+            break
+    if not pub:
+        return jsonify({"error": "device not found"}), 404
+    tmp_full = "/tmp/wg-reset-full.conf"
+    tmp_no = "/tmp/wg-reset-partial.conf"
+    r = subprocess.run(["wg-quick", "strip", "/root/wg-easy/config/wg0.conf"],
+                       capture_output=True, text=True, timeout=10)
+    if r.returncode != 0:
+        return jsonify({"error": "wg-quick strip failed"}), 500
+    full = r.stdout
+    with open(tmp_full, "w") as f:
+        f.write(full)
+    # split into blocks ([Interface], [Peer] xN) and drop the target peer
+    blocks, cur = [], []
+    for ln in full.splitlines():
+        s = ln.strip()
+        if (s.startswith("[") and s.endswith("]")) and cur:
+            blocks.append(cur)
+            cur = []
+        cur.append(ln)
+    if cur:
+        blocks.append(cur)
+    keep = []
+    for b in blocks:
+        if b and b[0].strip() == "[Peer]" and \
+                any("PublicKey" in l and pub in l for l in b):
+            continue
+        keep.append(b)
+    partial = "\n".join("\n".join(b) for b in keep) + "\n"
+    with open(tmp_no, "w") as f:
+        f.write(partial)
+    # 1) remove the peer (its counters vanish with it)
+    r1 = subprocess.run(["wg", "syncconf", "wg0", tmp_no],
+                        capture_output=True, text=True, timeout=15)
+    # 2) restore the full config (peer re-added with zero counters)
+    r2 = subprocess.run(["wg", "syncconf", "wg0", tmp_full],
+                        capture_output=True, text=True, timeout=15)
+    ok = r1.returncode == 0 and r2.returncode == 0
+    return jsonify({"ok": ok,
+                    "err": (r1.stderr + r2.stderr).strip()[:200] if not ok else ""})
+
+
+@app.route("/api/devices/<client_id>", methods=["DELETE"])
+def api_device_delete(client_id):
+    data, code = _wge_api("DELETE", f"/api/wireguard/client/{client_id}")
+    if code in (200, 204):
+        return jsonify({"ok": True})
+    # wg-easy quirk: delete needs the wg0.json map key, not the API list id
+    try:
+        cfg = json.load(open(WG_EASY_CONFIG))
+        for k, c in cfg.get("clients", {}).items():
+            if c.get("id") == client_id:
+                data, code = _wge_api("DELETE", f"/api/wireguard/client/{k}")
+                return jsonify({"ok": code in (200, 204)})
+    except Exception:
+        pass
+    return jsonify({"error": "delete failed", "code": code}), 500
+
+
+def _log_state():
+    p = os.path.join(DATA_DIR, "log-state.json")
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except Exception:
+        return {"agh_querylog_enabled": True}
+
+
+def _set_log_state(d):
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(os.path.join(DATA_DIR, "log-state.json"), "w") as f:
+            json.dump(d, f)
+    except Exception:
+        pass
+
+
+@app.route("/api/logs")
+def api_logs():
+    ql_enabled = _log_state().get("agh_querylog_enabled", True)
+    devices, _ = _wge_api("GET", "/api/wireguard/client")
+    dev_out = []
+    if isinstance(devices, list):
+        for c in devices:
+            ip = c.get("address")
+            q = {"recent": [], "count": 0}
+            if ip:
+                qd, _ = _agh_api("GET", f"/control/querylog?search={ip}&limit=20")
+                if isinstance(qd, dict) and isinstance(qd.get("data"), list):
+                    q["recent"] = [{
+                        "time": e.get("time", ""),
+                        "name": (e.get("question") or {}).get("name", "?"),
+                        "type": (e.get("question") or {}).get("type", ""),
+                        "answer": (e.get("answer") or [{}])[0].get("value", ""),
+                        "blocked": any("0.0.0.0" in str(a.get("value", "")) or
+                                       e.get("reason") == "FilteredBlackList"
+                                       for a in e.get("answer", [])),
+                    } for e in qd["data"]]
+                    q["count"] = len(qd["data"])
+            dev_out.append({
+                "name": c.get("name"), "address": ip,
+                "queries": q,
+                "rx": c.get("transferRx", 0), "tx": c.get("transferTx", 0),
+                "handshake": c.get("latestHandshakeAt"),
+            })
+    return jsonify({"agh_querylog_enabled": ql_enabled, "devices": dev_out})
+
+
+@app.route("/api/logs/agh_toggle", methods=["POST"])
+def api_logs_agh_toggle():
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get("enabled"))
+    # this AGH build: interval is in DAYS (90 max-ish); endpoint is POST-only
+    _agh_api("POST", "/control/querylog_config",
+             {"enabled": enabled, "interval": 90, "anonymize_client_ip": False})
+    _set_log_state({"agh_querylog_enabled": enabled})
+    return jsonify({"ok": True, "enabled": enabled})
+
+
+@app.route("/api/logs/docker")
+def api_logs_docker():
+    lines = min(int(request.args.get("lines", 100)), 500)
+    r = subprocess.run(["docker", "logs", "--tail", str(lines), "wg-easy"],
+                       capture_output=True, text=True, timeout=15)
+    return jsonify({"log": r.stdout[-20000:] + r.stderr[-2000:]})
+
+
+@app.route("/api/logs/clear", methods=["POST"])
+def api_logs_clear():
+    body = request.get_json(silent=True) or {}
+    scope = body.get("scope", "all")
+    result = {"agh": False, "docker": False}
+    if scope in ("agh", "all"):
+        r, code = _agh_api("POST", "/control/querylog_clear")
+        result["agh"] = code in (200, 204) or r is None
+    if scope in ("docker", "all"):
+        try:
+            path = subprocess.run(
+                ["docker", "inspect", "-f", "{{.LogPath}}", "wg-easy"],
+                capture_output=True, text=True, timeout=10).stdout.strip()
+            if path:
+                with open(path, "w") as f:
+                    f.truncate(0)
+                result["docker"] = True
+        except Exception:
+            pass
+    return jsonify({"ok": True, "result": result})
+
+
+# ---------------------------------------------------------------- speedtest ---
 _st_lock = threading.Lock()
 _st_running = False
 _st_result = None

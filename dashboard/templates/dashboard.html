@@ -114,6 +114,56 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn:active:not(:disabled) { opacity: 0.8; }
 
+.gen-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.gen-row input {
+    flex: 1; min-width: 200px; min-height: 48px; padding: 0 14px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); font-size: 1rem;
+}
+.muted-note { color: var(--text-muted); font-size: 0.8rem; margin: 4px 0 10px; line-height: 1.4; }
+.gen-result { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--bg-elevated); margin-top: 10px; text-align: center; }
+.gen-result img, .gen-result svg { max-width: 220px; width: 100%; height: auto; background: #fff; border-radius: 8px; padding: 6px; }
+.gen-result .btn { margin-top: 10px; width: auto; padding: 10px 24px; }
+
+.dev-list { display: flex; flex-direction: column; gap: 10px; }
+.dev-card { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); padding: 12px 14px; }
+.dev-card .dev-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
+.dev-card .dev-name { font-weight: 600; font-size: 1rem; }
+.dev-card .dev-meta { color: var(--text-muted); font-size: 0.8rem; margin: 4px 0 8px; }
+.dev-card .dev-stats { font-size: 0.85rem; color: var(--text-primary); }
+.dev-actions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px; }
+.dev-actions .mini {
+    min-height: 44px; padding: 0 12px; font-size: 0.85rem; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); cursor: pointer;
+}
+.dev-actions .mini.danger { color: #ff5c5c; border-color: #ff5c5c; }
+
+.log-controls { display: flex; flex-direction: column; gap: 10px; }
+.log-toggle-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.log-toggle-row strong { font-size: 0.95rem; }
+.log-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+.log-btns .btn { width: auto; padding: 10px 16px; min-height: 44px; }
+.log-pre {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; font-size: 0.72rem; line-height: 1.5; overflow-x: auto;
+    max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: var(--text-primary);
+}
+.qrow { font-size: 0.8rem; padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.qrow .qname { font-weight: 500; word-break: break-all; }
+.qrow .qmeta { color: var(--text-muted); white-space: nowrap; }
+.qrow.blocked .qname { text-decoration: line-through; color: #ff5c5c; }
+
+.switch { position: relative; display: inline-block; width: 52px; height: 30px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+    position: absolute; cursor: pointer; inset: 0; background: var(--border); border-radius: 30px; transition: 0.2s;
+}
+.slider:before {
+    position: absolute; content: ""; height: 24px; width: 24px; left: 3px; bottom: 3px;
+    background: #fff; border-radius: 50%; transition: 0.2s;
+}
+.switch input:checked + .slider { background: var(--accent-blue); }
+.switch input:checked + .slider:before { transform: translateX(22px); }
+
 .sp-test-card { text-align: center; padding: 8px 0 4px; }
 .sp-big { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
 .sp-item { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 14px 8px; }
@@ -164,6 +214,8 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
   <nav class="tabs" id="tabNav">
     <button class="tab-btn active" data-tab="overview"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Overview</button>
     <button class="tab-btn" data-tab="vpn"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>VPN</button>
+    <button class="tab-btn" data-tab="devices"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>Devices</button>
+    <button class="tab-btn" data-tab="logs"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Logs</button>
     <button class="tab-btn" data-tab="services"><svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>Services</button>
     <button class="tab-btn" data-tab="speedtest"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Speed Test</button>
     <button class="tab-btn" data-tab="system"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>System</button>
@@ -234,6 +286,50 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
     </div>
     <a class="link-btn" href="http://10.66.66.1:51821"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>wg-easy Dashboard — add or remove VPN devices<span class="hint">10.66.66.1:51821</span></a>
     <a class="link-btn" href="http://10.66.66.1:3000"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>AdGuard Home — query log and blocklists<span class="hint">10.66.66.1:3000</span></a>
+  </section>
+
+  <!-- DEVICES -->
+  <section class="tab-panel" id="panel-devices">
+    <div class="section">
+      <h2><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>New Device Profile</h2>
+      <div class="gen-row">
+        <input type="text" id="devName" placeholder="Device name (e.g. iPad, Work Laptop)" maxlength="40" autocomplete="off">
+        <button class="btn primary" id="devGenBtn" onclick="generateDevice()">Generate</button>
+      </div>
+      <p class="muted-note" id="genMsg">Creates a new profile. Scan the QR with the WireGuard app or download the file. One profile = one device.</p>
+      <div id="genResult" style="display:none;" class="gen-result">
+        <div id="genQr"></div>
+        <a id="genDl" class="btn primary" href="#" download>Download .conf</a>
+        <button class="btn" onclick="closeGenResult()">Done</button>
+      </div>
+    </div>
+    <div class="section">
+      <h2><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>Devices</h2>
+      <div id="deviceList" class="dev-list">loading…</div>
+    </div>
+  </section>
+
+  <!-- LOGS -->
+  <section class="tab-panel" id="panel-logs">
+    <div class="section">
+      <h2><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Logging</h2>
+      <div class="log-controls">
+        <div class="log-toggle-row">
+          <span><strong>DNS query logging</strong><br><span class="muted-note">AdGuard records which domains each device asks for. WireGuard itself keeps no session logs — only live transfer totals.</span></span>
+          <label class="switch"><input type="checkbox" id="aghLogToggle" onchange="toggleAghLog(this.checked)"><span class="slider"></span></label>
+        </div>
+        <div class="log-btns">
+          <button class="btn" onclick="clearLogs('agh')">Clear DNS Logs</button>
+          <button class="btn" onclick="loadDockerLog()">Show Server Log</button>
+          <button class="btn" onclick="clearLogs('docker')">Clear Server Log</button>
+        </div>
+        <pre id="dockerLog" class="log-pre" style="display:none;"></pre>
+      </div>
+    </div>
+    <div class="section">
+      <h2><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>Per-Device DNS Activity</h2>
+      <div id="logDevices" class="dev-list">loading…</div>
+    </div>
   </section>
 
   <!-- SERVICES -->
@@ -323,6 +419,8 @@ document.getElementById('tabNav').addEventListener('click', function(e) {
   document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.toggle('active', b === btn); });
   document.querySelectorAll('.tab-panel').forEach(function(p){ p.classList.toggle('active', p.id === 'panel-' + btn.dataset.tab); });
   if (btn.dataset.tab === 'speedtest') loadSpHistory();
+  if (btn.dataset.tab === 'devices') loadDevices();
+  if (btn.dataset.tab === 'logs') loadLogs();
 });
 
 var lastRefresh = Date.now(), pollTimer = null, lastSuccess = null;
@@ -456,6 +554,112 @@ if (window.PRELOAD && window.PRELOAD.ts) {
 }
 loadStats();
 setInterval(loadStats, 5000);
+
+// ---- devices ----
+function loadDevices() {
+  fetch('/api/devices?t=' + Date.now()).then(function(r){ return r.json(); }).then(function(d){
+    var list = d.devices || [];
+    if (!list.length) { document.getElementById('deviceList').innerHTML = '<p class="muted-note">No devices yet — generate one above.</p>'; return; }
+    var html = '';
+    list.forEach(function(dev){
+      var tag = dev.connected ? '<span class="tag tag-green"><span class="dot"></span>connected</span>' : '<span class="tag tag-red"><span class="dot"></span>offline</span>';
+      var hs = dev.handshake ? dev.handshake.replace('T', ' ').slice(0, 19) + 'Z' : 'never';
+      html += '<div class="dev-card">' +
+        '<div class="dev-head"><span class="dev-name">' + esc(dev.name) + '</span>' + tag + '</div>' +
+        '<div class="dev-meta">' + esc(dev.address || '') + ' · last handshake ' + esc(hs) + '</div>' +
+        '<div class="dev-stats">down ' + fmtBytes(dev.rx) + ' · up ' + fmtBytes(dev.tx) + '</div>' +
+        '<div class="dev-actions">' +
+          '<button class="mini" onclick="showQr(\'' + dev.id + '\')">QR</button>' +
+          '<button class="mini" onclick="dlConf(\'' + dev.id + '\')">Download</button>' +
+          '<button class="mini" onclick="toggleDevice(\'' + dev.id + '\',' + (!dev.enabled) + ')">' + (dev.enabled ? 'Disable' : 'Enable') + '</button>' +
+          (dev.resettable ? '<button class="mini" onclick="resetDevice(\'' + dev.id + '\')">Reset counters</button>' : '') +
+          '<button class="mini danger" onclick="deleteDevice(\'' + dev.id + '\',\'' + esc(dev.name).replace(/'/g, '') + '\')">Delete</button>' +
+        '</div></div>';
+    });
+    document.getElementById('deviceList').innerHTML = html;
+  }).catch(function(){ document.getElementById('deviceList').innerHTML = 'failed to load devices'; });
+}
+function generateDevice() {
+  var inp = document.getElementById('devName');
+  var name = inp.value.trim();
+  if (!name) { document.getElementById('genMsg').textContent = 'Type a device name first.'; return; }
+  var btn = document.getElementById('devGenBtn');
+  btn.disabled = true; btn.textContent = 'Generating…';
+  fetch('/api/devices', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: name})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) throw new Error(d.error || 'failed');
+      document.getElementById('genMsg').textContent = 'Profile "' + name + '" created at ' + d.address + '. Scan with the WireGuard app.';
+      var qr = document.getElementById('genQr');
+      qr.innerHTML = '<img src="/api/devices/' + d.id + '/qrcode?t=' + Date.now() + '" alt="QR code">';
+      document.getElementById('genDl').href = '/api/devices/' + d.id + '/config/download';
+      document.getElementById('genResult').style.display = 'block';
+      inp.value = '';
+      loadDevices();
+    })
+    .catch(function(e){ document.getElementById('genMsg').textContent = 'Error: ' + e.message; })
+    .finally(function(){ btn.disabled = false; btn.textContent = 'Generate'; });
+}
+function closeGenResult() { document.getElementById('genResult').style.display = 'none'; }
+function showQr(id) {
+  document.getElementById('genQr').innerHTML = '<img src="/api/devices/' + id + '/qrcode?t=' + Date.now() + '" alt="QR code">';
+  document.getElementById('genDl').href = '/api/devices/' + id + '/config/download';
+  document.getElementById('genMsg').textContent = 'QR for this device.';
+  document.getElementById('genResult').style.display = 'block';
+}
+function dlConf(id) { window.location.href = '/api/devices/' + id + '/config/download'; }
+function toggleDevice(id, enable) {
+  fetch('/api/devices/' + id + '/toggle', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enable: enable})})
+    .then(function(r){ return r.json(); }).then(function(){ setTimeout(loadDevices, 800); });
+}
+function resetDevice(id) {
+  if (!confirm('Reset traffic counters for this device? It reconnects automatically in a few seconds.')) return;
+  fetch('/api/devices/' + id + '/reset', {method: 'POST'}).then(function(){ loadDevices(); });
+}
+function deleteDevice(id, name) {
+  if (!confirm('Delete device "' + name + '"? Its VPN access ends immediately.')) return;
+  fetch('/api/devices/' + id, {method: 'DELETE'}).then(function(){ loadDevices(); });
+}
+
+// ---- logs ----
+function loadLogs() {
+  fetch('/api/logs?t=' + Date.now()).then(function(r){ return r.json(); }).then(function(d){
+    document.getElementById('aghLogToggle').checked = !!d.agh_querylog_enabled;
+    var html = '';
+    (d.devices || []).forEach(function(dev){
+      html += '<div class="dev-card"><div class="dev-head"><span class="dev-name">' + esc(dev.name) + '</span><span class="dev-meta">' + esc(dev.address) + '</span></div>';
+      var qs = dev.queries.recent || [];
+      html += '<div class="dev-meta">' + qs.length + ' recent DNS queries' + (qs.length >= 20 ? ' (capped at 20)' : '') + '</div>';
+      if (!qs.length) { html += '<p class="muted-note">No queries recorded' + (d.agh_querylog_enabled ? '' : ' — query logging is off') + '.</p>'; }
+      qs.forEach(function(q){
+        html += '<div class="qrow' + (q.blocked ? ' blocked' : '') + '"><span class="qname">' + esc(q.name) + '</span><span class="qmeta">' + esc(q.time.replace('T', ' ').slice(0, 19)) + ' · ' + esc(q.type) + ' → ' + esc(q.answer) + (q.blocked ? ' · blocked' : '') + '</span></div>';
+      });
+      html += '</div>';
+    });
+    document.getElementById('logDevices').innerHTML = html || '<p class="muted-note">No devices.</p>';
+  }).catch(function(){ document.getElementById('logDevices').innerHTML = 'failed to load logs'; });
+}
+function toggleAghLog(on) {
+  fetch('/api/logs/agh_toggle', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled: on})})
+    .then(function(r){ return r.json(); }).then(function(d){
+      document.getElementById('aghLogToggle').checked = !!d.enabled;
+      loadLogs();
+    });
+}
+function clearLogs(scope) {
+  var labels = {agh: 'Clear all DNS query logs?', docker: 'Clear the server log?'};
+  if (!confirm(labels[scope] || 'Clear logs?')) return;
+  fetch('/api/logs/clear', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({scope: scope})})
+    .then(function(){ loadLogs(); if (scope === 'docker') { document.getElementById('dockerLog').style.display = 'none'; } });
+}
+function loadDockerLog() {
+  var pre = document.getElementById('dockerLog');
+  if (pre.style.display === 'block') { pre.style.display = 'none'; return; }
+  pre.style.display = 'block'; pre.textContent = 'loading…';
+  fetch('/api/logs/docker?lines=150').then(function(r){ return r.json(); }).then(function(d){
+    pre.textContent = d.log || '(empty)';
+  });
+}
 
 // speedtest
 var spPoll = null;
