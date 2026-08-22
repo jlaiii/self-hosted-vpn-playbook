@@ -742,6 +742,30 @@ def api_logs():
     return jsonify({"agh_querylog_enabled": ql_enabled, "devices": dev_out})
 
 
+def _set_yaml_querylog(enabled):
+    """Explicitly set querylog.enabled in AGH's yaml (source of truth at
+    startup) — removes the API-persist vs restart race."""
+    path = "/opt/AdGuardHome/AdGuardHome.yaml"
+    try:
+        lines = open(path).read().splitlines()
+        in_ql = False
+        out = []
+        for ln in lines:
+            s = ln.strip()
+            if s.startswith("querylog:"):
+                in_ql = True
+                out.append(ln)
+                continue
+            if in_ql and s and not (ln.startswith(" ") or ln.startswith("\t")):
+                in_ql = False
+            if in_ql and s.startswith("enabled:"):
+                ln = ln.split(":")[0] + ": " + ("true" if enabled else "false")
+            out.append(ln)
+        open(path, "w").write("\n".join(out) + "\n")
+    except Exception:
+        pass
+
+
 @app.route("/api/logs/agh_toggle", methods=["POST"])
 def api_logs_agh_toggle():
     body = request.get_json(silent=True) or {}
@@ -749,6 +773,28 @@ def api_logs_agh_toggle():
     # this AGH build: interval is in DAYS (90 max-ish); endpoint is POST-only
     _agh_api("POST", "/control/querylog_config",
              {"enabled": enabled, "interval": 90, "anonymize_client_ip": False})
+    _set_yaml_querylog(enabled)
+    if not enabled:
+        # turning logging OFF = also DELETE everything already saved:
+        # in-memory log (API), on-disk log file (must be REMOVED — a
+        # truncated-but-present file breaks AGH's file writer init), cache
+        _agh_api("POST", "/control/querylog_clear")
+        try:
+            path = os.environ.get("VPS_DASH_AGH_QLOG",
+                                  "/opt/AdGuardHome/data/querylog.json")
+            os.remove(path)
+        except Exception:
+            pass
+        _QL_CACHE["mtime"] = 0
+        _QL_CACHE["rows"] = []
+    # AGH only (re)initializes its file writer when query logging is enabled
+    # at startup — restart in both directions. ~5s DNS pause.
+    try:
+        time.sleep(1)  # let AGH settle after the config POST
+        subprocess.run(["systemctl", "restart", "adguardhome"],
+                       capture_output=True, timeout=20)
+    except Exception:
+        pass
     _set_log_state({"agh_querylog_enabled": enabled})
     return jsonify({"ok": True, "enabled": enabled})
 

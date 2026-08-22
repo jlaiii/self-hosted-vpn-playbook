@@ -338,7 +338,7 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
       <h2><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Logging</h2>
       <div class="log-controls">
         <div class="log-toggle-row">
-          <span><strong>DNS query logging — ON by default</strong><br><span class="muted-note">Every website each device visits is logged (domain names, timestamps, blocked ads) with 90-day history. Toggle off for no logging. WireGuard itself keeps no session logs — only live transfer totals.</span></span>
+          <span><strong>DNS query logging — ON by default</strong><br><span class="muted-note">Every website each device visits is logged (domain names, timestamps, blocked ads) with 90-day history. Toggle OFF = stops recording and <strong>deletes all saved logs</strong> — nothing is kept. Toggling restarts the DNS service (~5s pause). WireGuard itself keeps no session logs — only live transfer totals.</span></span>
           <label class="switch"><input type="checkbox" id="aghLogToggle" onchange="toggleAghLog(this.checked)"><span class="slider"></span></label>
         </div>
         <div class="log-btns">
@@ -755,6 +755,7 @@ function loadLogs() {
   }).catch(function(){ document.getElementById('logDevices').innerHTML = 'failed to load logs'; });
 }
 function toggleAghLog(on) {
+  if (!on && !confirm('Turn logging OFF? This stops recording AND deletes all saved logs — no logs will remain.')) return;
   fetch('/api/logs/agh_toggle', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled: on})})
     .then(function(r){ return r.json(); }).then(function(d){
       document.getElementById('aghLogToggle').checked = !!d.enabled;
