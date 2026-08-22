@@ -299,7 +299,13 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
       <p class="muted-note" id="genMsg">Creates a new profile. Scan the QR with the WireGuard app or download the file. One profile = one device.</p>
       <div id="genResult" style="display:none;" class="gen-result">
         <div id="genQr"></div>
-        <a id="genDl" class="btn primary" href="#" download>Download .conf</a>
+        <div class="log-btns" style="justify-content:center;margin-top:8px;">
+          <a id="genDl" class="btn" href="#" download>Download .conf</a>
+          <a id="genDlPng" class="btn" href="#" download>QR as image (.png)</a>
+          <button class="btn" onclick="copyConf()">Copy config</button>
+        </div>
+        <button class="mini" id="genShowConf" onclick="toggleConfText()">Show config text</button>
+        <pre id="genConfText" class="log-pre" style="display:none;"></pre>
         <button class="btn" onclick="closeGenResult()">Done</button>
       </div>
     </div>
@@ -315,7 +321,7 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
       <h2><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Logging</h2>
       <div class="log-controls">
         <div class="log-toggle-row">
-          <span><strong>DNS query logging</strong><br><span class="muted-note">AdGuard records which domains each device asks for. WireGuard itself keeps no session logs — only live transfer totals.</span></span>
+          <span><strong>DNS query logging — ON by default</strong><br><span class="muted-note">Every website each device visits is logged (domain names, timestamps, blocked ads) with 90-day history. Toggle off for no logging. WireGuard itself keeps no session logs — only live transfer totals.</span></span>
           <label class="switch"><input type="checkbox" id="aghLogToggle" onchange="toggleAghLog(this.checked)"><span class="slider"></span></label>
         </div>
         <div class="log-btns">
@@ -579,6 +585,17 @@ function loadDevices() {
     document.getElementById('deviceList').innerHTML = html;
   }).catch(function(){ document.getElementById('deviceList').innerHTML = 'failed to load devices'; });
 }
+var lastGenId = null, lastGenConf = null;
+function populateGenResult(id) {
+  lastGenId = id;
+  document.getElementById('genQr').innerHTML = '<img src="/api/devices/' + id + '/qrcode?t=' + Date.now() + '" alt="QR code">';
+  document.getElementById('genDl').href = '/api/devices/' + id + '/config/download';
+  document.getElementById('genDlPng').href = '/api/devices/' + id + '/qrcode.png';
+  fetch('/api/devices/' + id + '/config').then(function(r){ return r.json(); }).then(function(d){
+    lastGenConf = d.conf || null;
+    document.getElementById('genConfText').textContent = lastGenConf || '(unavailable)';
+  });
+}
 function generateDevice() {
   var inp = document.getElementById('devName');
   var name = inp.value.trim();
@@ -589,10 +606,8 @@ function generateDevice() {
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (!d.ok) throw new Error(d.error || 'failed');
-      document.getElementById('genMsg').textContent = 'Profile "' + name + '" created at ' + d.address + '. Scan with the WireGuard app.';
-      var qr = document.getElementById('genQr');
-      qr.innerHTML = '<img src="/api/devices/' + d.id + '/qrcode?t=' + Date.now() + '" alt="QR code">';
-      document.getElementById('genDl').href = '/api/devices/' + d.id + '/config/download';
+      document.getElementById('genMsg').textContent = 'Profile "' + name + '" created at ' + d.address + '. Scan the QR with the WireGuard app, or download the file and share it.';
+      populateGenResult(d.id);
       document.getElementById('genResult').style.display = 'block';
       inp.value = '';
       loadDevices();
@@ -600,11 +615,33 @@ function generateDevice() {
     .catch(function(e){ document.getElementById('genMsg').textContent = 'Error: ' + e.message; })
     .finally(function(){ btn.disabled = false; btn.textContent = 'Generate'; });
 }
+function copyConf() {
+  var txt = lastGenConf || '';
+  if (!txt) { document.getElementById('genMsg').textContent = 'Config not loaded yet.'; return; }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(function(){
+      document.getElementById('genMsg').textContent = 'Config copied to clipboard.';
+    }).catch(function(){ fallbackCopy(txt); });
+  } else { fallbackCopy(txt); }
+}
+function fallbackCopy(txt) {
+  var ta = document.createElement('textarea');
+  ta.value = txt; document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); document.getElementById('genMsg').textContent = 'Config copied.'; }
+  catch(e) { document.getElementById('genMsg').textContent = 'Copy failed — use Show config text and select manually.'; }
+  document.body.removeChild(ta);
+}
+function toggleConfText() {
+  var pre = document.getElementById('genConfText');
+  var btn = document.getElementById('genShowConf');
+  var show = pre.style.display !== 'block';
+  pre.style.display = show ? 'block' : 'none';
+  btn.textContent = show ? 'Hide config text' : 'Show config text';
+}
 function closeGenResult() { document.getElementById('genResult').style.display = 'none'; }
 function showQr(id) {
-  document.getElementById('genQr').innerHTML = '<img src="/api/devices/' + id + '/qrcode?t=' + Date.now() + '" alt="QR code">';
-  document.getElementById('genDl').href = '/api/devices/' + id + '/config/download';
-  document.getElementById('genMsg').textContent = 'QR for this device.';
+  populateGenResult(id);
+  document.getElementById('genMsg').textContent = 'QR for this device — download the file or the QR image to share.';
   document.getElementById('genResult').style.display = 'block';
 }
 function dlConf(id) { window.location.href = '/api/devices/' + id + '/config/download'; }
@@ -629,7 +666,7 @@ function loadLogs() {
     (d.devices || []).forEach(function(dev){
       html += '<div class="dev-card"><div class="dev-head"><span class="dev-name">' + esc(dev.name) + '</span><span class="dev-meta">' + esc(dev.address) + '</span></div>';
       var qs = dev.queries.recent || [];
-      html += '<div class="dev-meta">' + qs.length + ' recent DNS queries' + (qs.length >= 20 ? ' (capped at 20)' : '') + '</div>';
+      html += '<div class="dev-meta"><strong>' + (dev.queries.total || 0) + '</strong> total logged queries (90-day history) · showing ' + qs.length + ' most recent' + (qs.length >= 20 ? ' (capped at 20)' : '') + '</div>';
       if (!qs.length) { html += '<p class="muted-note">No queries recorded' + (d.agh_querylog_enabled ? '' : ' — query logging is off') + '.</p>'; }
       qs.forEach(function(q){
         html += '<div class="qrow' + (q.blocked ? ' blocked' : '') + '"><span class="qname">' + esc(q.name) + '</span><span class="qmeta">' + esc(q.time.replace('T', ' ').slice(0, 19)) + ' · ' + esc(q.type) + ' → ' + esc(q.answer) + (q.blocked ? ' · blocked' : '') + '</span></div>';

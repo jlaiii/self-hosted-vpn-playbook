@@ -539,6 +539,23 @@ def api_device_qrcode(client_id):
     return Response(data, mimetype="image/svg+xml")
 
 
+@app.route("/api/devices/<client_id>/qrcode.png")
+def api_device_qrcode_png(client_id):
+    """QR as PNG — shareable to other devices (scan from gallery/AirDrop)."""
+    conf = _device_conf(client_id)
+    if not conf:
+        return jsonify({"error": "config fetch failed"}), 404
+    png = f"/tmp/qr-{client_id[:8]}.png"
+    r = subprocess.run(["qrencode", "-o", png, "-t", "PNG", "-s", "12",
+                        "-m", "2"], input=conf, capture_output=True, text=True,
+                       timeout=15)
+    if r.returncode != 0 or not os.path.exists(png):
+        return jsonify({"error": "qrencode failed"}), 500
+    from flask import send_file
+    return send_file(png, mimetype="image/png", as_attachment=True,
+                     download_name=f"vpn-{client_id[:8]}.png")
+
+
 @app.route("/api/devices/<client_id>/toggle", methods=["POST"])
 def api_device_toggle(client_id):
     body = request.get_json(silent=True) or {}
@@ -637,6 +654,18 @@ def _set_log_state(d):
         pass
 
 
+def _ql_total(ip):
+    """Total logged DNS queries for a client IP (from the querylog JSONL)."""
+    try:
+        path = os.environ.get("VPS_DASH_AGH_QLOG",
+                              "/opt/AdGuardHome/data/querylog.json")
+        r = subprocess.run(["grep", "-c", f'"IP":"{ip}"', path],
+                           capture_output=True, text=True, timeout=20)
+        return int(r.stdout.strip() or 0)
+    except Exception:
+        return 0
+
+
 @app.route("/api/logs")
 def api_logs():
     ql_enabled = _log_state().get("agh_querylog_enabled", True)
@@ -645,8 +674,9 @@ def api_logs():
     if isinstance(devices, list):
         for c in devices:
             ip = c.get("address")
-            q = {"recent": [], "count": 0}
+            q = {"recent": [], "count": 0, "total": 0}
             if ip:
+                q["total"] = _ql_total(ip)
                 qd, _ = _agh_api("GET", f"/control/querylog?search={ip}&limit=20")
                 if isinstance(qd, dict) and isinstance(qd.get("data"), list):
                     q["recent"] = [{
