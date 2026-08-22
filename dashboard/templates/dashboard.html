@@ -164,6 +164,23 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
 .switch input:checked + .slider { background: var(--accent-blue); }
 .switch input:checked + .slider:before { transform: translateX(22px); }
 
+.sel {
+    min-height: 48px; padding: 0 12px; border-radius: 10px; font-size: 0.95rem;
+    border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary);
+    flex: 1; min-width: 180px; max-width: 320px;
+}
+.log-pg { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.log-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elevated); }
+.log-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; min-width: 560px; }
+.log-table th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 600; position: sticky; top: 0; background: var(--bg-elevated); }
+.log-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); word-break: break-all; }
+.log-table tr.blocked td { color: #ff5c5c; }
+.log-table .num { text-align: right; color: var(--text-muted); white-space: nowrap; }
+.top-row { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 0.85rem; align-items: baseline; }
+.top-row .tn { font-weight: 600; word-break: break-all; }
+.top-row .tc { white-space: nowrap; color: var(--text-muted); font-size: 0.78rem; }
+.top-row .tb { color: #ff5c5c; white-space: nowrap; font-size: 0.78rem; }
+
 .sp-test-card { text-align: center; padding: 8px 0 4px; }
 .sp-big { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
 .sp-item { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 14px 8px; }
@@ -331,6 +348,23 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
         </div>
         <pre id="dockerLog" class="log-pre" style="display:none;"></pre>
       </div>
+    </div>
+    <div class="section">
+      <h2><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Top Sites / Apps (90)</h2>
+      <div class="gen-row">
+        <select id="topDevSel" class="sel" onchange="loadTopSites()"><option value="">All devices</option></select>
+      </div>
+      <div id="topSites" class="dev-list">loading…</div>
+    </div>
+    <div class="section">
+      <h2><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Full Activity Log — everything</h2>
+      <div class="gen-row">
+        <select id="fullDevSel" class="sel" onchange="loadFullLog(1)"><option value="">All devices</option></select>
+        <a class="btn" style="width:auto;min-height:44px;padding:0 14px;" id="exportBtn" href="/api/logs/export" download>Download CSV</a>
+      </div>
+      <p class="muted-note">"All devices" includes the server's own health-check queries (10.66.66.1) — pick a device to see only its activity.</p>
+      <div class="log-pg"><button class="mini" onclick="loadFullLog(curFullPage - 1)">Prev</button><span id="fullPgInfo" class="dev-meta">—</span><button class="mini" onclick="loadFullLog(curFullPage + 1)">Next</button></div>
+      <div id="fullLog" class="log-table-wrap">loading…</div>
     </div>
     <div class="section">
       <h2><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>Per-Device DNS Activity</h2>
@@ -659,9 +693,51 @@ function deleteDevice(id, name) {
 }
 
 // ---- logs ----
+var curFullPage = 1;
+function fillDevSelects(devices) {
+  ['topDevSel', 'fullDevSel'].forEach(function(id){
+    var sel = document.getElementById(id);
+    var keep = sel.value;
+    sel.innerHTML = '<option value="">All devices</option>' +
+      (devices || []).map(function(d){ return '<option value="' + esc(d.address) + '">' + esc(d.name) + ' (' + esc(d.address) + ')</option>'; }).join('');
+    sel.value = keep;
+  });
+}
+function loadTopSites() {
+  var ip = document.getElementById('topDevSel').value;
+  fetch('/api/logs/top?device=' + encodeURIComponent(ip) + '&limit=90&t=' + Date.now())
+    .then(function(r){ return r.json(); }).then(function(d){
+      var html = '';
+      if (!d.top || !d.top.length) { html = '<p class="muted-note">No logged activity yet.</p>'; }
+      d.top.forEach(function(s, i){
+        html += '<div class="top-row"><span class="tn">' + (i + 1) + '. ' + esc(s.name) + '</span>' +
+          '<span class="tc">' + s.count + '×</span>' +
+          (s.blocked ? '<span class="tb">' + s.blocked + ' blocked</span>' : '') + '</div>';
+      });
+      if (d.total_domains > 90) html += '<p class="muted-note">Showing top 90 of ' + d.total_domains + ' domains.</p>';
+      document.getElementById('topSites').innerHTML = html;
+    }).catch(function(){ document.getElementById('topSites').innerHTML = 'failed to load'; });
+}
+function loadFullLog(page) {
+  var ip = document.getElementById('fullDevSel').value;
+  if (page < 1) page = 1;
+  fetch('/api/logs/full?device=' + encodeURIComponent(ip) + '&page=' + page + '&limit=100&t=' + Date.now())
+    .then(function(r){ return r.json(); }).then(function(d){
+      curFullPage = d.page;
+      document.getElementById('fullPgInfo').textContent = 'page ' + d.page + ' of ' + d.pages + ' · ' + d.total + ' entries';
+      document.getElementById('exportBtn').href = '/api/logs/export?device=' + encodeURIComponent(ip);
+      var html = '<table class="log-table"><thead><tr><th>TIME</th><th>DEVICE</th><th>DOMAIN / APP</th><th>TYPE</th><th>STATUS</th></tr></thead><tbody>';
+      (d.rows || []).forEach(function(r){
+        html += '<tr' + (r.blocked ? ' class="blocked"' : '') + '><td>' + esc(r.t.replace('T', ' ').slice(0, 19)) + '</td><td>' + esc(r.ip) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.type) + '</td><td>' + (r.blocked ? 'blocked' : '—') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      document.getElementById('fullLog').innerHTML = html || '<p class="muted-note">No entries.</p>';
+    }).catch(function(){ document.getElementById('fullLog').innerHTML = 'failed to load'; });
+}
 function loadLogs() {
   fetch('/api/logs?t=' + Date.now()).then(function(r){ return r.json(); }).then(function(d){
     document.getElementById('aghLogToggle').checked = !!d.agh_querylog_enabled;
+    fillDevSelects(d.devices || []);
     var html = '';
     (d.devices || []).forEach(function(dev){
       html += '<div class="dev-card"><div class="dev-head"><span class="dev-name">' + esc(dev.name) + '</span><span class="dev-meta">' + esc(dev.address) + '</span></div>';
@@ -674,6 +750,8 @@ function loadLogs() {
       html += '</div>';
     });
     document.getElementById('logDevices').innerHTML = html || '<p class="muted-note">No devices.</p>';
+    loadTopSites();
+    loadFullLog(1);
   }).catch(function(){ document.getElementById('logDevices').innerHTML = 'failed to load logs'; });
 }
 function toggleAghLog(on) {

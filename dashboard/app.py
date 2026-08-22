@@ -654,6 +654,50 @@ def _set_log_state(d):
         pass
 
 
+_QL_CACHE = {"mtime": 0, "rows": []}
+
+
+def _ql_rows():
+    """All querylog entries (newest first), parsed from the JSONL file.
+
+    Cached in memory, invalidated by file mtime (the file is appended to).
+    """
+    path = os.environ.get("VPS_DASH_AGH_QLOG",
+                          "/opt/AdGuardHome/data/querylog.json")
+    try:
+        mtime = os.path.getmtime(path)
+    except Exception:
+        return []
+    if _QL_CACHE["mtime"] == mtime and _QL_CACHE["rows"]:
+        return _QL_CACHE["rows"]
+    rows = []
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except Exception:
+                    continue
+                q = e.get("QH") or ""
+                if not q:
+                    continue
+                res = e.get("Result") or {}
+                blocked = bool(res.get("IsFiltered")) or \
+                    "0.0.0.0" in str(e.get("Answer") or "")
+                rows.append({"t": e.get("T", ""), "ip": e.get("IP", ""),
+                             "name": q, "type": e.get("QT", ""),
+                             "blocked": blocked})
+    except Exception:
+        pass
+    rows.sort(key=lambda r: r["t"], reverse=True)
+    _QL_CACHE["mtime"] = mtime
+    _QL_CACHE["rows"] = rows
+    return rows
+
+
 def _ql_total(ip):
     """Total logged DNS queries for a client IP (from the querylog JSONL)."""
     try:
@@ -715,6 +759,60 @@ def api_logs_docker():
     r = subprocess.run(["docker", "logs", "--tail", str(lines), "wg-easy"],
                        capture_output=True, text=True, timeout=15)
     return jsonify({"log": r.stdout[-20000:] + r.stderr[-2000:]})
+
+
+@app.route("/api/logs/top")
+def api_logs_top():
+    """Top domains (with blocked counts) per device or overall."""
+    ip = request.args.get("device", "")
+    limit = min(int(request.args.get("limit", 90)), 200)
+    counts = {}
+    for r in _ql_rows():
+        if ip and r["ip"] != ip:
+            continue
+        d = counts.setdefault(r["name"], {"count": 0, "blocked": 0})
+        d["count"] += 1
+        if r["blocked"]:
+            d["blocked"] += 1
+    top = sorted(counts.items(), key=lambda kv: -kv[1]["count"])[:limit]
+    return jsonify({"top": [{"name": k, **v} for k, v in top],
+                    "total_domains": len(counts)})
+
+
+@app.route("/api/logs/full")
+def api_logs_full():
+    """Paginated full query log (everything, oldest history included)."""
+    ip = request.args.get("device", "")
+    page = max(int(request.args.get("page", 1)), 1)
+    limit = min(int(request.args.get("limit", 100)), 500)
+    rows = [r for r in _ql_rows() if (not ip or r["ip"] == ip)]
+    total = len(rows)
+    start = (page - 1) * limit
+    pages = max(1, (total + limit - 1) // limit)
+    if page > pages:
+        page = pages
+        start = (page - 1) * limit
+    return jsonify({"rows": rows[start:start + limit], "total": total,
+                    "page": page, "pages": pages, "limit": limit})
+
+
+@app.route("/api/logs/export")
+def api_logs_export():
+    """Download the complete query log (optionally per device) as CSV."""
+    import csv
+    import io
+    ip = request.args.get("device", "")
+    rows = [r for r in _ql_rows() if (not ip or r["ip"] == ip)]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["time", "device_ip", "domain", "type", "blocked"])
+    for r in rows[:200000]:
+        w.writerow([r["t"], r["ip"], r["name"], r["type"],
+                    "yes" if r["blocked"] else ""])
+    from flask import Response
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition":
+                             "attachment; filename=vpn-querylog.csv"})
 
 
 @app.route("/api/logs/clear", methods=["POST"])
