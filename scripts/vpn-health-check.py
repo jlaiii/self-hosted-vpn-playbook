@@ -50,6 +50,10 @@ TEST_NS = "vpn-health-ns"
 TEST_HOST_IP = "10.88.88.1"
 TEST_CLIENT_IP = "10.88.88.2"
 LOCK = "/tmp/vpn-health-check.lock"
+EXCLUDE_NETS = os.environ.get("EXCLUDE_NETS", "10.88.88.0/24").split(",")
+AUTOFIX_JOB = os.environ.get("AUTOFIX_JOB", "vpn-autofix")
+AUTOFIX_COOLDOWN_S = int(os.environ.get("AUTOFIX_COOLDOWN_S", "1800"))
+AUTOFIX_TRIGGER_TS = "/tmp/vpn-autofix-trigger.ts"
 
 flags = []
 
@@ -92,6 +96,10 @@ rules = [
      "FORWARD eth0->wg0 ESTABLISHED rule missing"),
     (f"iptables -C INPUT -i eth0 -p tcp --dport {UI_PORT} -j DROP",
      f"UI port {UI_PORT} public-block rule missing (dashboard exposed!)"),
+    (f"iptables -t mangle -C FORWARD -i {WG_IF} -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1240",
+     "MSS clamp wg0->eth0 missing (big sites will stall: MTU black hole)"),
+    (f"iptables -t mangle -C FORWARD -o {WG_IF} -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1240",
+     "MSS clamp eth0->wg0 missing (big sites will stall: MTU black hole)"),
 ]
 for cmd, desc in rules:
     if sh(cmd).returncode != 0:
@@ -151,6 +159,61 @@ for line in r.stdout.strip().splitlines()[1:]:
     if a.is_private or a.is_loopback or a.is_link_local:
         flag(f"peer {parts[0][:10]}… has private/test endpoint {ep} — "
              "a test rig or stale client is holding the tunnel slot")
+
+# 10. rejected-handshake detector: a device knocking with keys the server
+#     doesn't recognize (outdated/foreign profile) gets silently ignored by
+#     WireGuard — the "connected but no internet" failure. Capture inbound
+#     handshake-init packets (UDP length 148) and flag sources that are not
+#     the endpoint of any recently-handshaken peer.
+def rejected_handshake_probe():
+    if os.environ.get("SKIP_HANDSHAKE_PROBE"):
+        return
+    if sh("which tcpdump").returncode != 0:
+        flag("tcpdump missing — rejected-handshake detection unavailable")
+        return
+    # public clients arrive via eth0 (veth/test traffic is excluded anyway);
+    # note: -i any does NOT see veth traffic on some kernels
+    capture_file = os.environ.get("CAPTURE_FILE")  # test hook: feed saved output
+    if capture_file:
+        r = subprocess.run(["cat", capture_file], capture_output=True, text=True)
+    else:
+        r = sh(f"timeout 15 tcpdump -i eth0 -nn -l udp port {WG_PORT} -c 40 2>/dev/null",
+               timeout=20)
+    sources = {}
+    for line in r.stdout.splitlines():
+        # "HH:MM:SS.mmm IP 1.2.3.4.1234 > 5.6.7.8.51820: UDP, length 148"
+        if "> " not in line or "length 148" not in line:
+            continue
+        try:
+            src = line.split(" IP ", 1)[1].split(" > ", 1)[0]
+            ip = src.rsplit(".", 1)[0]
+            a = ipaddress.ip_address(ip)
+        except (IndexError, ValueError):
+            continue
+        if a.is_loopback or a.is_link_local:
+            continue
+        if any(a in ipaddress.ip_network(n) for n in EXCLUDE_NETS):
+            continue
+        if a.is_private and not os.environ.get("ALLOW_PRIVATE_PROBE"):
+            continue  # local test rigs; public-internet devices only
+        sources[ip] = sources.get(ip, 0) + 1
+    # which peers handshook recently, from where
+    live_endpoints = set()
+    try:
+        r2 = sh(f"wg show {WG_IF} dump", timeout=10)
+        now = time.time()
+        for line in r2.stdout.strip().splitlines()[1:]:
+            p = line.split("\t")
+            if len(p) >= 8 and p[2] and p[4] and int(p[4]) > now - 120:
+                live_endpoints.add(p[2].rsplit(":", 1)[0])
+    except Exception:
+        pass
+    for ip, count in sources.items():
+        if count >= 3 and ip not in live_endpoints:
+            flag(f"rejected handshakes from {ip} ({count} attempts in 15s) — "
+                 "that device has an outdated/foreign profile; the server "
+                 "ignores it. Fix: delete and re-import the profile on the device.")
+
 
 # 9. active egress test (dedicated healthcheck peer, real traffic)
 def egress_test():
@@ -223,9 +286,33 @@ else:
         except OSError:
             pass
 
+rejected_handshake_probe()
+
+
+def wake_autofix():
+    """Event-driven AI wake: only pays tokens when something is broken."""
+    try:
+        last = 0.0
+        if os.path.exists(AUTOFIX_TRIGGER_TS):
+            try:
+                last = float(open(AUTOFIX_TRIGGER_TS).read().strip() or 0)
+            except ValueError:
+                last = 0.0
+        if time.time() - last < AUTOFIX_COOLDOWN_S:
+            return False
+        with open(AUTOFIX_TRIGGER_TS, "w") as f:
+            f.write(str(time.time()))
+        r = sh(f"hermes cron run {AUTOFIX_JOB}", timeout=30)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 if flags:
     print(f"VPN HEALTH CHECK FAILED — {len(flags)} issue(s)")
     for f in flags:
         print(f"FLAG: {f}")
+    if wake_autofix():
+        print("(autofix agent woken)")
     sys.exit(1)
 sys.exit(0)

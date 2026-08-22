@@ -42,6 +42,28 @@ Checks (each failure prints a `FLAG:` line):
    netns using the dedicated `healthcheck` peer's key and proves real traffic:
    handshake → ICMP to 1.1.1.1 → HTTPS egress with the server's public IP.
    Catches forwarding/NAT/routing breakage that presence checks miss.
+10. **Rejected-handshake detector** — captures inbound UDP on the WG port for
+    15s and flags public sources sending repeated handshake-inits (length 148)
+    that don't match any recently-handshaken peer. This is the "device has an
+    outdated/foreign profile" failure: WireGuard silently ignores them, so the
+    device shows "connected" but has no internet. The MSS clamp rules are also
+    checked (eth0 MTU 1400 + wg0 MTU 1320 require clamped MSS 1240 — without
+    it, big sites like DDG stall on TLS while small sites work).
+
+## Event-driven AI wake (tokens only when broken)
+
+When the watchdog finds flags it also wakes the autofix agent immediately:
+`hermes cron run vpn-autofix` with a 30-minute cooldown state file
+(`/tmp/vpn-autofix-trigger.ts`). The autofix job also runs a silent fallback
+sweep every 2h in case the trigger path ever fails. Healthy ticks cost zero
+tokens; the AI only spends tokens when something is actually wrong.
+
+Testing hook: `CAPTURE_FILE=<file>` feeds saved tcpdump output to the
+rejected-handshake detector instead of a live capture; `ALLOW_PRIVATE_PROBE=1`
+disables the private-IP skip for drills. Note: `-i any` does not see veth
+traffic on some kernels — the probe captures on eth0 (where real clients
+arrive). Note: Python's `ipaddress` classifies TEST-NET ranges
+(203.0.113.0/24 etc.) as private — don't use them as drill IPs.
 
 Setup requirement: create the healthcheck peer once —
 `bash /root/wg-easy/add-wg-profile.sh healthcheck` (its key lives in the
