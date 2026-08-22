@@ -69,6 +69,16 @@ Setup requirement: create the healthcheck peer once —
 `bash /root/wg-easy/add-wg-profile.sh healthcheck` (its key lives in the
 wg-easy volume; the script reads it from wg0.json).
 
+The `scripts/setup-vpn.sh` installer wires all of the above automatically,
+including a plain-cron watchdog entry (no Hermes required):
+
+```cron
+*/5 * * * * root WG_EASY_CONFIG=/opt/vpn-stack/config/wg0.json python3 /usr/local/bin/vpn-health-check.py
+```
+
+For Hermes hosts, instead use the two cron jobs described below (the watchdog
+also wakes the autofix event-driven on flags).
+
 Exit 0 when clean (silent — nothing delivered). Non-zero + FLAG lines when
 broken (delivered as the alert).
 
