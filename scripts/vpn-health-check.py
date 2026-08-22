@@ -30,6 +30,8 @@ WG_SUBNET = os.environ.get("WG_SUBNET", "10.66.66.0/24")
 DNS_IP = os.environ.get("DNS_IP", "10.66.66.1")
 ADGUARD_UNIT = os.environ.get("ADGUARD_UNIT", "adguardhome")
 RULES_UNIT = os.environ.get("RULES_UNIT", "wg-nft-rules")
+DASH_UNIT = os.environ.get("DASH_UNIT", "vps-dashboard")
+DASH_URL = os.environ.get("DASH_URL", f"http://{DNS_IP}:8088/")
 BLOCK_TEST = os.environ.get("BLOCK_TEST_DOMAIN", "doubleclick.net")
 
 flags = []
@@ -95,6 +97,15 @@ if r.returncode != 0 or "0.0.0.0" not in r.stdout:
 r = sh(f"systemctl is-enabled {RULES_UNIT}")
 if r.stdout.strip() != "enabled":
     flag(f"unit '{RULES_UNIT}' not enabled (firewall rules would vanish on reboot)")
+
+# 7. dashboard unit active + responding
+r = sh(f"systemctl is-active {DASH_UNIT}")
+if r.stdout.strip() != "active":
+    flag(f"dashboard unit '{DASH_UNIT}' not active ({r.stdout.strip() or 'unknown'})")
+else:
+    r = sh(f"curl -s -o /dev/null -w '%{{http_code}}' -m 5 {DASH_URL}")
+    if r.stdout.strip() != "200":
+        flag(f"dashboard not responding at {DASH_URL} (HTTP {r.stdout.strip() or 'timeout'})")
 
 if flags:
     print(f"VPN HEALTH CHECK FAILED — {len(flags)} issue(s)")
