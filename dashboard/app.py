@@ -144,12 +144,35 @@ def _os_info():
     return {"os": f"{uname.sysname} {uname.release}", "kernel": uname.release}
 
 
+_SERVER_IP = {"v": "", "ts": 0}
+
+
+def _server_ip():
+    """VPS public IPv4, live-checked via ip.me, cached 15 min."""
+    if time.time() - _SERVER_IP["ts"] < 900 and _SERVER_IP["v"]:
+        return _SERVER_IP["v"]
+    try:
+        r = subprocess.run(
+            ["curl", "-s", "--max-time", "6", "https://ip.me"],
+            capture_output=True, text=True, timeout=10)
+        ip = r.stdout.strip()
+        if r.returncode == 0 and ip and "." in ip:
+            _SERVER_IP.update(v=ip, ts=time.time())
+            return ip
+    except Exception:
+        pass
+    if _SERVER_IP["v"]:
+        return _SERVER_IP["v"]
+    return os.environ.get("WG_HOST", "65.75.202.18")
+
+
 def _slow_data():
     return {
         "containers": docker_containers(),
         "units": key_units(),
         "wg": wg_peers(),
         "f2b": f2b_bans(),
+        "server_ip": _server_ip(),
     }
 
 
@@ -253,6 +276,14 @@ def wg_peers():
             continue
         pub = parts[0]
         endpoint = parts[2] or "—"
+        allowed = parts[3]
+        tun_ip = allowed.split(",")[0].split("/")[0] if allowed else "—"
+        dev_ip = "—"
+        if endpoint and endpoint != "—":
+            if endpoint.startswith("["):
+                dev_ip = endpoint.split("]")[0].lstrip("[")
+            else:
+                dev_ip = endpoint.rsplit(":", 1)[0]
         hs = parts[4]
         if hs == "0":
             hs_txt = "never"
@@ -271,6 +302,8 @@ def wg_peers():
         peers.append({
             "name": names.get(pub, pub[:10] + "…"),
             "endpoint": endpoint,
+            "ip": tun_ip,
+            "device_ip": dev_ip,
             "handshake": hs_txt,
             "connected": connected,
             "rx": int(parts[5]), "tx": int(parts[6]),
@@ -634,261 +667,6 @@ def api_device_delete(client_id):
     except Exception:
         pass
     return jsonify({"error": "delete failed", "code": code}), 500
-
-
-def _log_state():
-    p = os.path.join(DATA_DIR, "log-state.json")
-    try:
-        with open(p) as f:
-            return json.load(f)
-    except Exception:
-        return {"agh_querylog_enabled": True}
-
-
-def _set_log_state(d):
-    try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(os.path.join(DATA_DIR, "log-state.json"), "w") as f:
-            json.dump(d, f)
-    except Exception:
-        pass
-
-
-_QL_CACHE = {"mtime": 0, "rows": []}
-
-
-def _ql_rows():
-    """All querylog entries (newest first), parsed from the JSONL file.
-
-    Cached in memory, invalidated by file mtime (the file is appended to).
-    """
-    path = os.environ.get("VPS_DASH_AGH_QLOG",
-                          "/opt/AdGuardHome/data/querylog.json")
-    try:
-        mtime = os.path.getmtime(path)
-    except Exception:
-        return []
-    if _QL_CACHE["mtime"] == mtime and _QL_CACHE["rows"]:
-        return _QL_CACHE["rows"]
-    rows = []
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    e = json.loads(line)
-                except Exception:
-                    continue
-                q = e.get("QH") or ""
-                if not q:
-                    continue
-                res = e.get("Result") or {}
-                blocked = bool(res.get("IsFiltered")) or \
-                    "0.0.0.0" in str(e.get("Answer") or "")
-                rows.append({"t": e.get("T", ""), "ip": e.get("IP", ""),
-                             "name": q, "type": e.get("QT", ""),
-                             "blocked": blocked})
-    except Exception:
-        pass
-    rows.sort(key=lambda r: r["t"], reverse=True)
-    _QL_CACHE["mtime"] = mtime
-    _QL_CACHE["rows"] = rows
-    return rows
-
-
-def _ql_total(ip):
-    """Total logged DNS queries for a client IP (from the querylog JSONL)."""
-    try:
-        path = os.environ.get("VPS_DASH_AGH_QLOG",
-                              "/opt/AdGuardHome/data/querylog.json")
-        r = subprocess.run(["grep", "-c", f'"IP":"{ip}"', path],
-                           capture_output=True, text=True, timeout=20)
-        return int(r.stdout.strip() or 0)
-    except Exception:
-        return 0
-
-
-@app.route("/api/logs")
-def api_logs():
-    ql_enabled = _log_state().get("agh_querylog_enabled", True)
-    devices, _ = _wge_api("GET", "/api/wireguard/client")
-    dev_out = []
-    if isinstance(devices, list):
-        for c in devices:
-            ip = c.get("address")
-            q = {"recent": [], "count": 0, "total": 0}
-            if ip:
-                q["total"] = _ql_total(ip)
-                qd, _ = _agh_api("GET", f"/control/querylog?search={ip}&limit=20")
-                if isinstance(qd, dict) and isinstance(qd.get("data"), list):
-                    q["recent"] = [{
-                        "time": e.get("time", ""),
-                        "name": (e.get("question") or {}).get("name", "?"),
-                        "type": (e.get("question") or {}).get("type", ""),
-                        "answer": (e.get("answer") or [{}])[0].get("value", ""),
-                        "blocked": any("0.0.0.0" in str(a.get("value", "")) or
-                                       e.get("reason") == "FilteredBlackList"
-                                       for a in e.get("answer", [])),
-                    } for e in qd["data"]]
-                    q["count"] = len(qd["data"])
-            dev_out.append({
-                "name": c.get("name"), "address": ip,
-                "queries": q,
-                "rx": c.get("transferRx", 0), "tx": c.get("transferTx", 0),
-                "handshake": c.get("latestHandshakeAt"),
-            })
-    return jsonify({"agh_querylog_enabled": ql_enabled, "devices": dev_out})
-
-
-def _set_yaml_querylog(enabled):
-    """Explicitly set querylog.enabled in AGH's yaml (source of truth at
-    startup) — removes the API-persist vs restart race."""
-    path = "/opt/AdGuardHome/AdGuardHome.yaml"
-    try:
-        lines = open(path).read().splitlines()
-        in_ql = False
-        out = []
-        for ln in lines:
-            s = ln.strip()
-            if s.startswith("querylog:"):
-                in_ql = True
-                out.append(ln)
-                continue
-            if in_ql and s and not (ln.startswith(" ") or ln.startswith("\t")):
-                in_ql = False
-            if in_ql and s.startswith("enabled:"):
-                ln = ln.split(":")[0] + ": " + ("true" if enabled else "false")
-            out.append(ln)
-        open(path, "w").write("\n".join(out) + "\n")
-    except Exception:
-        pass
-
-
-@app.route("/api/logs/agh_toggle", methods=["POST"])
-def api_logs_agh_toggle():
-    body = request.get_json(silent=True) or {}
-    enabled = bool(body.get("enabled"))
-    # this AGH build: interval is in DAYS (90 max-ish); endpoint is POST-only
-    _agh_api("POST", "/control/querylog_config",
-             {"enabled": enabled, "interval": 90, "anonymize_client_ip": False})
-    _set_yaml_querylog(enabled)
-    if not enabled:
-        # turning logging OFF = also DELETE everything already saved:
-        # in-memory log (API), on-disk log file (must be REMOVED — a
-        # truncated-but-present file breaks AGH's file writer init), cache
-        _agh_api("POST", "/control/querylog_clear")
-        try:
-            path = os.environ.get("VPS_DASH_AGH_QLOG",
-                                  "/opt/AdGuardHome/data/querylog.json")
-            os.remove(path)
-        except Exception:
-            pass
-        _QL_CACHE["mtime"] = 0
-        _QL_CACHE["rows"] = []
-    # AGH only (re)initializes its file writer when query logging is enabled
-    # at startup — restart in both directions. ~5s DNS pause.
-    try:
-        time.sleep(1)  # let AGH settle after the config POST
-        subprocess.run(["systemctl", "restart", "adguardhome"],
-                       capture_output=True, timeout=20)
-    except Exception:
-        pass
-    _set_log_state({"agh_querylog_enabled": enabled})
-    return jsonify({"ok": True, "enabled": enabled})
-
-
-@app.route("/api/logs/docker")
-def api_logs_docker():
-    lines = min(int(request.args.get("lines", 100)), 500)
-    try:
-        r = subprocess.run(["timeout", "12", "docker", "logs", "--tail",
-                            str(lines), "wg-easy"],
-                           capture_output=True, text=True, timeout=15)
-        out = r.stdout
-        if r.returncode != 0:
-            return jsonify({"log": "(log unavailable — " +
-                            (r.stderr.strip()[:80] or "timeout") + ")"})
-    except Exception as e:
-        return jsonify({"log": "(log unavailable — " + str(e)[:80] + ")"})
-    return jsonify({"log": out[-20000:]})
-
-
-@app.route("/api/logs/top")
-def api_logs_top():
-    """Top domains (with blocked counts) per device or overall."""
-    ip = request.args.get("device", "")
-    limit = min(int(request.args.get("limit", 90)), 200)
-    counts = {}
-    for r in _ql_rows():
-        if ip and r["ip"] != ip:
-            continue
-        d = counts.setdefault(r["name"], {"count": 0, "blocked": 0})
-        d["count"] += 1
-        if r["blocked"]:
-            d["blocked"] += 1
-    top = sorted(counts.items(), key=lambda kv: -kv[1]["count"])[:limit]
-    return jsonify({"top": [{"name": k, **v} for k, v in top],
-                    "total_domains": len(counts)})
-
-
-@app.route("/api/logs/full")
-def api_logs_full():
-    """Paginated full query log (everything, oldest history included)."""
-    ip = request.args.get("device", "")
-    page = max(int(request.args.get("page", 1)), 1)
-    limit = min(int(request.args.get("limit", 100)), 500)
-    rows = [r for r in _ql_rows() if (not ip or r["ip"] == ip)]
-    total = len(rows)
-    start = (page - 1) * limit
-    pages = max(1, (total + limit - 1) // limit)
-    if page > pages:
-        page = pages
-        start = (page - 1) * limit
-    return jsonify({"rows": rows[start:start + limit], "total": total,
-                    "page": page, "pages": pages, "limit": limit})
-
-
-@app.route("/api/logs/export")
-def api_logs_export():
-    """Download the complete query log (optionally per device) as CSV."""
-    import csv
-    import io
-    ip = request.args.get("device", "")
-    rows = [r for r in _ql_rows() if (not ip or r["ip"] == ip)]
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(["time", "device_ip", "domain", "type", "blocked"])
-    for r in rows[:200000]:
-        w.writerow([r["t"], r["ip"], r["name"], r["type"],
-                    "yes" if r["blocked"] else ""])
-    from flask import Response
-    return Response(buf.getvalue(), mimetype="text/csv",
-                    headers={"Content-Disposition":
-                             "attachment; filename=vpn-querylog.csv"})
-
-
-@app.route("/api/logs/clear", methods=["POST"])
-def api_logs_clear():
-    body = request.get_json(silent=True) or {}
-    scope = body.get("scope", "all")
-    result = {"agh": False, "docker": False}
-    if scope in ("agh", "all"):
-        r, code = _agh_api("POST", "/control/querylog_clear")
-        result["agh"] = code in (200, 204) or r is None
-    if scope in ("docker", "all"):
-        # truncating a docker json log in place breaks the daemon's reader
-        # (docker logs hangs / returns nothing) — restart instead: the
-        # container starts with a fresh log file. ~10s tunnel pause.
-        try:
-            r = subprocess.run(["timeout", "30", "docker", "restart",
-                                "wg-easy"], capture_output=True, text=True,
-                               timeout=35)
-            result["docker"] = r.returncode == 0
-        except Exception:
-            pass
-    return jsonify({"ok": True, "result": result})
 
 
 # ---------------------------------------------------------------- speedtest ---

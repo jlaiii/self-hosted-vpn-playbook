@@ -232,7 +232,6 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
     <button class="tab-btn active" data-tab="overview"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Overview</button>
     <button class="tab-btn" data-tab="vpn"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>VPN</button>
     <button class="tab-btn" data-tab="devices"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>Devices</button>
-    <button class="tab-btn" data-tab="logs"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Logs</button>
     <button class="tab-btn" data-tab="services"><svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>Services</button>
     <button class="tab-btn" data-tab="speedtest"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Speed Test</button>
     <button class="tab-btn" data-tab="system"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>System</button>
@@ -293,11 +292,16 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
         <div class="value" style="font-size:1.1rem;" id="aghState">–</div>
         <div class="meta">DNS 10.66.66.1</div>
       </div>
+      <div class="stat-card">
+        <div class="label">Server IP</div>
+        <div class="value" style="font-size:1.1rem;" id="serverIp">–</div>
+        <div class="meta">VPS public IPv4 · live-checked</div>
+      </div>
     </div>
     <div class="section">
       <h2><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Devices</h2>
       <div class="table-scroll"><table>
-        <thead><tr><th>Device</th><th>Last handshake</th><th>Received</th><th>Sent</th><th>Status</th></tr></thead>
+        <thead><tr><th>Device</th><th>Tunnel IP</th><th>Device IP</th><th>Last handshake</th><th>Received</th><th>Sent</th><th>Status</th></tr></thead>
         <tbody id="peerRows"></tbody>
       </table></div>
     </div>
@@ -329,46 +333,6 @@ td:first-child { color: var(--text-primary); font-weight: 600; }
     <div class="section">
       <h2><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>Devices</h2>
       <div id="deviceList" class="dev-list">loading…</div>
-    </div>
-  </section>
-
-  <!-- LOGS -->
-  <section class="tab-panel" id="panel-logs">
-    <div class="section">
-      <h2><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Logging</h2>
-      <div class="log-controls">
-        <div class="log-toggle-row">
-          <span><strong>DNS query logging — ON by default</strong><br><span class="muted-note">Every website each device visits is logged (domain names, timestamps, blocked ads) with 90-day history. Toggle OFF = stops recording and <strong>deletes all saved logs</strong> — nothing is kept. Toggling restarts the DNS service (~5s pause). WireGuard itself keeps no session logs — only live transfer totals.</span></span>
-          <label class="switch"><input type="checkbox" id="aghLogToggle" onchange="toggleAghLog(this.checked)"><span class="slider"></span></label>
-        </div>
-        <div class="log-btns">
-          <button class="btn" onclick="clearLogs('agh')">Clear DNS Logs</button>
-          <button class="btn" onclick="loadDockerLog()">Show Server Log</button>
-          <button class="btn" onclick="clearLogs('docker')">Clear Server Log (restarts VPN container)</button>
-        </div>
-        <pre id="dockerLog" class="log-pre" style="display:none;"></pre>
-      </div>
-    </div>
-    <div class="section">
-      <h2><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Top Sites / Apps (90)</h2>
-      <div class="gen-row">
-        <select id="topDevSel" class="sel" onchange="loadTopSites()"><option value="">All devices</option></select>
-      </div>
-      <div id="topSites" class="dev-list">loading…</div>
-    </div>
-    <div class="section">
-      <h2><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Full Activity Log — everything</h2>
-      <div class="gen-row">
-        <select id="fullDevSel" class="sel" onchange="loadFullLog(1)"><option value="">All devices</option></select>
-        <a class="btn" style="width:auto;min-height:44px;padding:0 14px;" id="exportBtn" href="/api/logs/export" download>Download CSV</a>
-      </div>
-      <p class="muted-note">"All devices" includes the server's own health-check queries (10.66.66.1) — pick a device to see only its activity.</p>
-      <div class="log-pg"><button class="mini" onclick="loadFullLog(curFullPage - 1)">Prev</button><span id="fullPgInfo" class="dev-meta">—</span><button class="mini" onclick="loadFullLog(curFullPage + 1)">Next</button></div>
-      <div id="fullLog" class="log-table-wrap">loading…</div>
-    </div>
-    <div class="section">
-      <h2><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>Per-Device DNS Activity</h2>
-      <div id="logDevices" class="dev-list">loading…</div>
     </div>
   </section>
 
@@ -460,7 +424,6 @@ document.getElementById('tabNav').addEventListener('click', function(e) {
   document.querySelectorAll('.tab-panel').forEach(function(p){ p.classList.toggle('active', p.id === 'panel-' + btn.dataset.tab); });
   if (btn.dataset.tab === 'speedtest') loadSpHistory();
   if (btn.dataset.tab === 'devices') loadDevices();
-  if (btn.dataset.tab === 'logs') loadLogs();
 });
 
 var lastRefresh = Date.now(), pollTimer = null, lastSuccess = null;
@@ -511,6 +474,7 @@ function renderStats(d) {
   var wg = d.wg || {};
   document.getElementById('wgState').textContent = wg.up ? 'Up' : 'Down';
   document.getElementById('wgState').style.color = wg.up ? 'var(--accent-green)' : 'var(--accent-red)';
+  document.getElementById('serverIp').textContent = d.server_ip || '—';
   var agh = d.units ? d.units.filter(function(u){return u.unit==='adguardhome';})[0] : null;
   var aghOn = agh && agh.active === 'active';
   document.getElementById('aghState').textContent = aghOn ? 'Active' : (agh ? agh.active : 'unknown');
@@ -520,9 +484,9 @@ function renderStats(d) {
     var tag = p.connected
       ? '<span class="tag tag-green"><span class="dot"></span>Connected</span>'
       : '<span class="tag tag-gray"><span class="dot"></span>' + esc(p.handshake) + '</span>';
-    prows += '<tr><td>' + esc(p.name) + '</td><td class="mono">' + esc(p.handshake) + '</td><td>' + fmtBytes(p.rx) + '</td><td>' + fmtBytes(p.tx) + '</td><td>' + tag + '</td></tr>';
+    prows += '<tr><td>' + esc(p.name) + '</td><td class="mono">' + esc(p.ip || '—') + '</td><td class="mono">' + esc(p.device_ip || '—') + '</td><td class="mono">' + esc(p.handshake) + '</td><td>' + fmtBytes(p.rx) + '</td><td>' + fmtBytes(p.tx) + '</td><td>' + tag + '</td></tr>';
   });
-  if (!(wg.peers || []).length) prows = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No devices configured</td></tr>';
+  if (!(wg.peers || []).length) prows = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);">No devices configured</td></tr>';
   document.getElementById('peerRows').innerHTML = prows;
 
   // services
@@ -690,92 +654,6 @@ function resetDevice(id) {
 function deleteDevice(id, name) {
   if (!confirm('Delete device "' + name + '"? Its VPN access ends immediately.')) return;
   fetch('/api/devices/' + id, {method: 'DELETE'}).then(function(){ loadDevices(); });
-}
-
-// ---- logs ----
-var curFullPage = 1;
-function fillDevSelects(devices) {
-  ['topDevSel', 'fullDevSel'].forEach(function(id){
-    var sel = document.getElementById(id);
-    var keep = sel.value;
-    sel.innerHTML = '<option value="">All devices</option>' +
-      (devices || []).map(function(d){ return '<option value="' + esc(d.address) + '">' + esc(d.name) + ' (' + esc(d.address) + ')</option>'; }).join('');
-    sel.value = keep;
-  });
-}
-function loadTopSites() {
-  var ip = document.getElementById('topDevSel').value;
-  fetch('/api/logs/top?device=' + encodeURIComponent(ip) + '&limit=90&t=' + Date.now())
-    .then(function(r){ return r.json(); }).then(function(d){
-      var html = '';
-      if (!d.top || !d.top.length) { html = '<p class="muted-note">No logged activity yet.</p>'; }
-      d.top.forEach(function(s, i){
-        html += '<div class="top-row"><span class="tn">' + (i + 1) + '. ' + esc(s.name) + '</span>' +
-          '<span class="tc">' + s.count + '×</span>' +
-          (s.blocked ? '<span class="tb">' + s.blocked + ' blocked</span>' : '') + '</div>';
-      });
-      if (d.total_domains > 90) html += '<p class="muted-note">Showing top 90 of ' + d.total_domains + ' domains.</p>';
-      document.getElementById('topSites').innerHTML = html;
-    }).catch(function(){ document.getElementById('topSites').innerHTML = 'failed to load'; });
-}
-function loadFullLog(page) {
-  var ip = document.getElementById('fullDevSel').value;
-  if (page < 1) page = 1;
-  fetch('/api/logs/full?device=' + encodeURIComponent(ip) + '&page=' + page + '&limit=100&t=' + Date.now())
-    .then(function(r){ return r.json(); }).then(function(d){
-      curFullPage = d.page;
-      document.getElementById('fullPgInfo').textContent = 'page ' + d.page + ' of ' + d.pages + ' · ' + d.total + ' entries';
-      document.getElementById('exportBtn').href = '/api/logs/export?device=' + encodeURIComponent(ip);
-      var html = '<table class="log-table"><thead><tr><th>TIME</th><th>DEVICE</th><th>DOMAIN / APP</th><th>TYPE</th><th>STATUS</th></tr></thead><tbody>';
-      (d.rows || []).forEach(function(r){
-        html += '<tr' + (r.blocked ? ' class="blocked"' : '') + '><td>' + esc(r.t.replace('T', ' ').slice(0, 19)) + '</td><td>' + esc(r.ip) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.type) + '</td><td>' + (r.blocked ? 'blocked' : '—') + '</td></tr>';
-      });
-      html += '</tbody></table>';
-      document.getElementById('fullLog').innerHTML = html || '<p class="muted-note">No entries.</p>';
-    }).catch(function(){ document.getElementById('fullLog').innerHTML = 'failed to load'; });
-}
-function loadLogs() {
-  fetch('/api/logs?t=' + Date.now()).then(function(r){ return r.json(); }).then(function(d){
-    document.getElementById('aghLogToggle').checked = !!d.agh_querylog_enabled;
-    fillDevSelects(d.devices || []);
-    var html = '';
-    (d.devices || []).forEach(function(dev){
-      html += '<div class="dev-card"><div class="dev-head"><span class="dev-name">' + esc(dev.name) + '</span><span class="dev-meta">' + esc(dev.address) + '</span></div>';
-      var qs = dev.queries.recent || [];
-      html += '<div class="dev-meta"><strong>' + (dev.queries.total || 0) + '</strong> total logged queries (90-day history) · showing ' + qs.length + ' most recent' + (qs.length >= 20 ? ' (capped at 20)' : '') + '</div>';
-      if (!qs.length) { html += '<p class="muted-note">No queries recorded' + (d.agh_querylog_enabled ? '' : ' — query logging is off') + '.</p>'; }
-      qs.forEach(function(q){
-        html += '<div class="qrow' + (q.blocked ? ' blocked' : '') + '"><span class="qname">' + esc(q.name) + '</span><span class="qmeta">' + esc(q.time.replace('T', ' ').slice(0, 19)) + ' · ' + esc(q.type) + ' → ' + esc(q.answer) + (q.blocked ? ' · blocked' : '') + '</span></div>';
-      });
-      html += '</div>';
-    });
-    document.getElementById('logDevices').innerHTML = html || '<p class="muted-note">No devices.</p>';
-    loadTopSites();
-    loadFullLog(1);
-  }).catch(function(){ document.getElementById('logDevices').innerHTML = 'failed to load logs'; });
-}
-function toggleAghLog(on) {
-  if (!on && !confirm('Turn logging OFF? This stops recording AND deletes all saved logs — no logs will remain.')) return;
-  fetch('/api/logs/agh_toggle', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled: on})})
-    .then(function(r){ return r.json(); }).then(function(d){
-      document.getElementById('aghLogToggle').checked = !!d.enabled;
-      loadLogs();
-    });
-}
-function clearLogs(scope) {
-  var labels = {agh: 'Clear all DNS query logs?', docker: 'Clear the server log? This restarts the VPN container (~10 second tunnel pause) and starts a fresh log.'};
-  if (!confirm(labels[scope] || 'Clear logs?')) return;
-  fetch('/api/logs/clear', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({scope: scope})})
-    .then(function(){ loadLogs(); if (scope === 'docker') { document.getElementById('dockerLog').style.display = 'none'; } });
-}
-function loadDockerLog() {
-  var pre = document.getElementById('dockerLog');
-  if (pre.style.display === 'block') { pre.style.display = 'none'; return; }
-  pre.style.display = 'block'; pre.textContent = 'loading…';
-  fetch('/api/logs/docker?lines=150').then(function(r){ return r.json(); }).then(function(d){
-    pre.textContent = d.log || '(empty)';
-    pre.scrollTop = pre.scrollHeight;
-  }).catch(function(){ pre.textContent = 'failed to load — try again'; });
 }
 
 // speedtest

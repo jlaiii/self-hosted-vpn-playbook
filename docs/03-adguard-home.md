@@ -45,9 +45,10 @@ filtering:
       name: OISD Blocklist Big
       id: 2
 querylog:
-  enabled: true
+  enabled: false                   # zero-logging default: no DNS history
+  file_enabled: false              # no querylog.json file, ever
 statistics:
-  enabled: true
+  enabled: false                   # no per-client/domain counters
 ```
 
 systemd unit:
@@ -94,6 +95,10 @@ curl -s -b cookies.txt http://10.66.66.1:3000/control/filtering/status
   the user wants forced safe search.
 - **Migrator drops non-default filters** (OISD etc.) — re-add via API:
   `POST /control/filtering/add_url {"name","url","whitelist":false}`.
+- **Migrator can flip `querylog`/`statistics` back ON** — after first start
+  or a version upgrade, re-check the yaml. `setup-vpn.sh` pins them OFF
+  automatically after migration; manual installs must patch the migrated
+  yaml by hand (schema 34 sections `querylog:` / `statistics:`).
 - **Admin UI + DNS must bind the tunnel IP only** — binding 0.0.0.0 makes you
   an open resolver and exposes the admin panel to the internet.
 - **Boot race with wg-easy** — AGH binds an IP that only exists after the

@@ -38,7 +38,11 @@ python3 -c "import bcrypt; print(bcrypt.hashpw(b'YOUR_PASSWORD', bcrypt.gensalt(
 
 ```bash
 docker compose up -d
-docker logs wg-easy | tail -5   # expect "Server Listening on http://0.0.0.0:51821" + config synced
+# NOTE: logging is disabled for this container (driver: none) — there is
+# deliberately NO `docker logs` output (zero-logging policy, see README).
+# Verify via the UI/API instead:
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:51821/   # 200
+docker ps --filter name=wg-easy --format '{{.Status}}'             # healthy
 ```
 
 ## Firewall: the legacy/nft trap (CRITICAL)

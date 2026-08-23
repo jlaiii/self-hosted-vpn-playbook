@@ -209,8 +209,8 @@ dns:
   disallowed_clients: []
   blocking_mode: default
   blocked_response_ttl: 10
-  querylog_enabled: true
-  querylog_file_enabled: true
+  querylog_enabled: false
+  querylog_file_enabled: false
   querylog_interval: 2160h
   querylog_size_memory: 1000
   anonymize_client_ip: false
@@ -294,6 +294,31 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload && systemctl enable --now adguardhome
+    # zero-logging enforcement — AGH's first-start migration rewrites the
+    # yaml (schema 30→34) and can flip querylog/statistics back ON. Pin both
+    # OFF in whatever schema AGH wrote, then restart (the file writer only
+    # ever initializes when querylog is enabled AT STARTUP).
+    python3 - <<'PYEOF'
+import re, subprocess, time
+time.sleep(2)
+p = "/opt/AdGuardHome/AdGuardHome.yaml"
+s = open(p).read()
+s = re.sub(r"^(\s*querylog_enabled:)\s*\S+", r"\1 false", s, flags=re.M)
+s = re.sub(r"^(\s*querylog_file_enabled:)\s*\S+", r"\1 false", s, flags=re.M)
+lines, cur = [], None
+for ln in s.splitlines():
+    if ln and not ln[0].isspace():
+        cur = ln.split(":")[0].strip()
+    st = ln.strip()
+    if cur == "querylog" and (st.startswith("enabled:") or st.startswith("file_enabled:")):
+        ln = ln.split(":")[0] + ": false"
+    if cur == "statistics" and st.startswith("enabled:"):
+        ln = ln.split(":")[0] + ": false"
+    lines.append(ln)
+open(p, "w").write("\n".join(lines) + "\n")
+subprocess.run(["systemctl", "restart", "adguardhome"], check=False)
+PYEOF
+    log "AdGuard zero-logging pinned (querylog + statistics OFF)"
     printf "AdGuard admin: http://%s:3000  password: %s\n" "$DNS_IP" "$AGH_PW" > /root/.adguard-creds.txt
     log "AdGuard installed (admin creds: /root/.adguard-creds.txt)"
 fi

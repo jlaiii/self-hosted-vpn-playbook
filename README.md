@@ -3,9 +3,10 @@
 A complete, battle-tested playbook for standing up a personal WireGuard VPN
 exit node on a Linux VPS — with phone-wide DNS ad-blocking, a self-service
 device dashboard, a stats dashboard, a zero-token health watchdog, and an
-AI autofix pattern. Written for humans **and AI agents**: every step is
-scripted, parameterized, and documented with the pitfalls that actually
-break things in production.
+AI autofix pattern. **Zero-logging by default**: no DNS query history, no
+connection logs, no per-client statistics (see Zero-logging policy below).
+Written for humans **and AI agents**: every step is scripted, parameterized,
+and documented with the pitfalls that actually break things in production.
 
 ## Stack
 
@@ -13,7 +14,7 @@ break things in production.
 |---|---|
 | WireGuard (via [wg-easy](https://github.com/wg-easy/wg-easy)) | Kernel-speed VPN tunnel, web UI to add/remove devices and show QR codes |
 | AdGuard Home *(optional)* | DNS ad/tracker blocking for every device on the tunnel (~450k rules, auto-updating) |
-| Stats dashboard (Flask) | CPU/RAM/disk/network, VPN devices, containers, on-demand Ookla speed tests, history — tunnel-only, mobile-first |
+| Stats dashboard (Flask) | CPU/RAM/disk/network, live VPS public IP (ip.me check), VPN devices with tunnel + real-world IPs, containers, on-demand Ookla speed tests — tunnel-only, mobile-first, **zero log features** |
 | `vpn-health-check.py` | 11-check watchdog: services, firewall rules, MSS clamp, ad-blocking, endpoint sanity, rejected-handshake detection, and a **live egress test** every run. Silent when healthy (zero tokens), `FLAG:` lines when broken |
 | `add-wg-profile.py` | Mint device profiles (QR + .conf) from the CLI — an AI agent can hand a profile to a user in one command |
 | `setup-vpn.sh` | **One-command installer** for the entire stack on a fresh VPS |
@@ -98,6 +99,35 @@ On Hermes hosts, pair the watchdog with an autofix job:
 
 Full prompts and wiring: [docs/04-health-monitoring.md](docs/04-health-monitoring.md).
 
+## Zero-logging policy (default)
+
+The stack ships with a strict no-history posture:
+
+| Layer | Logging state |
+|---|---|
+| WireGuard kernel module | Never logs traffic — only live rx/tx counters (nothing to disable) |
+| AdGuard Home | `querylog.enabled: false` + `file_enabled: false`, `statistics.enabled: false` — no DNS history, no counters, no `querylog.json` |
+| wg-easy | `logging: driver: none` — the container writes no log at all (`docker logs` is empty by design) |
+| Stats dashboard | No Logs tab, no `/api/logs*` endpoints, no toggle — the logging feature is removed, not hidden |
+
+`setup-vpn.sh` pins all of this automatically, including a post-migration
+enforcement step (AGH's first-start config migration can flip the flags
+back ON). On manual installs, patch the migrated yaml by hand (docs/03).
+
+Logins are unaffected: the wg-easy UI still requires its password (it
+hard-requires `PASSWORD_HASH`) and AdGuard keeps its admin login.
+
+If you ever re-enable DNS logging: set querylog `enabled: true` and restart
+AGH (its file writer only initializes when enabled at startup). Disabling
+again requires `querylog_clear`, REMOVING `querylog.json` (a truncated file
+breaks AGH's file-writer init), then writing `enabled: false` into the yaml
+and restarting.
+
+The dashboard's VPN tab shows what IS live — and only live: the server's
+public IP (checked via ip.me, cached 15 min) plus each device's tunnel IP
+(`10.66.66.x`) and its real-world source IP. Transient display only; never
+appended to any history file.
+
 ## Pitfalls (all discovered the hard way — all handled)
 
 - **Docker sets FORWARD policy to DROP** — tunnel forwarding dies silently
@@ -116,6 +146,9 @@ Full prompts and wiring: [docs/04-health-monitoring.md](docs/04-health-monitorin
   `healthcheck` peer exists for exactly this
 - **`tcpdump -i any` misses veth traffic on some kernels** — capture on the
   public interface
+- **wg-easy with `logging: driver: none` produces no `docker logs` output** —
+  an empty log is the zero-logging design, not a crash; verify via the UI
+  (`curl :51821` → 200) and `docker ps` health instead
 
 ## Repo layout
 
