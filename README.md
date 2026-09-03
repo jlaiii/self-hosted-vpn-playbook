@@ -14,8 +14,8 @@ and documented with the pitfalls that actually break things in production.
 |---|---|
 | WireGuard (via [wg-easy](https://github.com/wg-easy/wg-easy)) | Kernel-speed VPN tunnel, web UI to add/remove devices and show QR codes |
 | AdGuard Home *(optional)* | DNS ad/tracker blocking for every device on the tunnel (~450k rules, auto-updating) |
-| Stats dashboard (Flask) | CPU/RAM/disk/network, live VPS public IP (ip.me check), VPN devices with tunnel + real-world IPs, containers, on-demand Ookla speed tests — tunnel-only, mobile-first, **zero log features** |
-| `vpn-health-check.py` | 11-check watchdog: services, firewall rules, MSS clamp, ad-blocking, endpoint sanity, rejected-handshake detection, and a **live egress test** every run. Silent when healthy (zero tokens), `FLAG:` lines when broken |
+| Stats dashboard (Flask) | CPU/RAM/disk/network, live VPS public IP (ip.me check), VPN devices with tunnel + real-world IPs, containers, on-demand Ookla speed tests — tunnel-only, mobile-first, **zero log features**. Reboot button + PWA shell included |
+| `vpn-health-check.py` | Watchdog **v3**: 16 checks (15 on hosts without the exit-provider sandbox) — services, firewall rules, MSS clamp, ad-blocking, endpoint sanity, rejected-handshake detection, live egress test, on-cadence Ookla speed test, plus SYSTEM checks (RAM/CPU/disk/failed units). Tiered: silent when healthy (zero tokens), scripted auto-fix on flags, `FLAG:` lines when broken |
 | `add-wg-profile.py` | Mint device profiles (QR + .conf) from the CLI — an AI agent can hand a profile to a user in one command |
 | `setup-vpn.sh` | **One-command installer** for the entire stack on a fresh VPS |
 
@@ -57,10 +57,14 @@ VPN** (everything is tunnel-only by design — nothing is exposed publicly).
 exit 0** — wire it into any scheduler and it costs nothing:
 
 ```cron
-*/5 * * * * root python3 /usr/local/bin/vpn-health-check.py
+*/5 * * * * root INCIDENTS_LOG=/opt/vpn-stack/dashboard/data/vpn-incidents.jsonl \
+  WD_CONFIG_FILE=/opt/vpn-stack/dashboard/data/watchdog-config.json \
+  python3 /usr/local/bin/vpn-health-check.py
 ```
 
-Its 11 checks (all env-parameterized):
+Its checks (all env-parameterized; 16 on hosts with the exit-provider
+sandbox, 15 without — every box-specific path skips cleanly when its state
+file is absent):
 
 1. wg-easy container running + healthy
 2. wg0 up, UDP port listening
@@ -78,6 +82,17 @@ Its 11 checks (all env-parameterized):
     `healthcheck` peer) in a netns: real handshake, ICMP, HTTPS egress with the
     expected public IP. Catches forwarding/NAT/routing breakage that presence
     checks miss.
+12. **On-cadence speed test** — Ookla CLI every `SPEEDTEST_EVERY_S` (default
+    30 min — a full test saturates the uplink ~20 s, so it never runs each
+    5-min tick). Flags on down/up/ping thresholds only.
+13. SYSTEM: memory pressure (RAM % and/or swap) — no scripted fix, AI tier
+14. SYSTEM: sustained CPU load (5-min avg vs cores × factor) — AI tier
+15. SYSTEM: root disk % — Tier 1 vacuums journal + apt cache first
+16. SYSTEM: failed systemd units — Tier 1 restarts them, AI investigates
+    persisting failures
+
+System checks (13-16) run FIRST each tick so the egress/speed tests don't
+skew the load reading.
 
 Plus a **rejected-handshake detector**: a 15s capture on the WG port flags
 public IPs sending repeated handshake-inits (length 148) that match no live
@@ -141,7 +156,8 @@ appended to any history file.
   without MSS clamping = big sites stall (DDG), small sites work (Google)
 - **Ookla CLI crashes without `HOME`** — systemd units need `Environment=HOME`
 - **Same client key on two endpoints** — handshakes bounce, the real device
-  gets "connected but no internet" (the watchdog's check #10 catches it)
+  gets "connected but no internet" (the watchdog's peer-endpoint-sanity check
+  catches it)
 - **systemd + netns tests**: never reuse a real device's key for tests; the
   `healthcheck` peer exists for exactly this
 - **`tcpdump -i any` misses veth traffic on some kernels** — capture on the
@@ -155,13 +171,25 @@ appended to any history file.
 ```
 scripts/
   setup-vpn.sh         one-command installer (fresh VPS)
-  vpn-health-check.py  11-check watchdog, zero tokens when healthy
+  vpn-health-check.py  watchdog v3 — silent when healthy, zero tokens
   add-wg-profile.py    mint device profiles (QR + .conf) via the wg-easy API
+  reboot_system.py     reboot helper for the dashboard's Server button
   verify-tunnel.sh     netns end-to-end tunnel test
-dashboard/             tunnel-only stats dashboard (Flask + psutil)
+dashboard/
+  app.py + templates/  tunnel-only stats dashboard (Flask + psutil)
+  static/              PWA shell (manifest, service worker, icons)
 docker-compose.wg-easy.yml   template for manual builds
 docs/                  01 tunnel · 02 wg-easy · 03 AdGuard · 04 monitoring
 ```
+
+> **Portability note (keeps this repo honest):** the dashboard in this repo
+> is the portable subset of the production dashboard it was curated from.
+> Box-specific extras — VPN exit-provider switching (Direct/WARP/Mullvad
+> sandbox), DeepSeek spend tracking, and the Hermes auto-updater cards — are
+> deliberately NOT included. They only make sense on the original host and
+> would break a fresh install (the exit-provider module is a hard import in
+> the full version). When syncing newer changes in, re-curate with the same
+> rule: keep everything a standalone VPS can use, drop what is host-bound.
 
 ## License
 

@@ -4,8 +4,9 @@
 # Builds on a fresh Ubuntu/Debian VPS:
 #   - wg-easy (WireGuard tunnel + self-service device dashboard)
 #   - firewall/NAT/MSS-clamp rules (systemd-persisted)
-#   - stats dashboard (Flask, tunnel-only)
-#   - vpn-health-check.py watchdog (11 checks) + cron entry
+#   - stats dashboard (Flask, tunnel-only, incl. PWA shell + reboot button)
+#   - vpn-health-check.py watchdog v3 (16 checks: VPN stack + SYSTEM tier +
+#     on-cadence speed test) + cron entry, incidents log for the dashboard
 #   - optional: AdGuard Home DNS ad-blocking (--with-adguard)
 #   - optional: Ookla CLI for the speed-test tab (--with-speedtest)
 #
@@ -102,9 +103,14 @@ systemctl daemon-reload && systemctl enable --now wg-nft-rules
 
 # ---------------------------------------------------------- stats dashboard --
 log "installing stats dashboard (http://$DNS_IP:$DASH_PORT, tunnel-only)"
-mkdir -p "$INSTALL_DIR/dashboard/templates" "$INSTALL_DIR/dashboard/data"
+mkdir -p "$INSTALL_DIR/dashboard/templates" "$INSTALL_DIR/dashboard/static" \
+    "$INSTALL_DIR/dashboard/data"
 cp "$(dirname "$0")/../dashboard/app.py" "$INSTALL_DIR/dashboard/app.py"
 cp "$(dirname "$0")/../dashboard/templates/dashboard.html" "$INSTALL_DIR/dashboard/templates/dashboard.html"
+cp "$(dirname "$0")/../dashboard/static/"* "$INSTALL_DIR/dashboard/static/"
+cp "$(dirname "$0")/reboot_system.py" "$INSTALL_DIR/reboot_system.py"
+printf 'Password: %s\n' "$UI_PASSWORD" > "$INSTALL_DIR/.ui-creds.txt"
+chmod 600 "$INSTALL_DIR/.ui-creds.txt"
 cat > /etc/systemd/system/vps-dashboard.service <<EOF
 [Unit]
 Description=VPS stats dashboard (tunnel-only)
@@ -119,6 +125,10 @@ Environment=VPS_DASH_BIND=$DNS_IP
 Environment=VPS_DASH_PORT=$DASH_PORT
 Environment=VPS_DASH_DATA_DIR=$INSTALL_DIR/dashboard/data
 Environment=VPS_DASH_WG_EASY_CONFIG=$INSTALL_DIR/config/wg0.json
+Environment=VPS_DASH_WG_CONF_FILE=$INSTALL_DIR/config/wg0.conf
+Environment=VPS_DASH_WG_CREDS=$INSTALL_DIR/.ui-creds.txt
+Environment=VPS_DASH_WATCHDOG_SCRIPT=/usr/local/bin/vpn-health-check.py
+Environment=VPS_DASH_REBOOT_SCRIPT=$INSTALL_DIR/reboot_system.py
 ExecStart=/usr/bin/python3 $INSTALL_DIR/dashboard/app.py
 Restart=always
 RestartSec=5
@@ -135,7 +145,9 @@ cp "$(dirname "$0")/add-wg-profile.py" /usr/local/bin/add-wg-profile.py
 chmod 755 /usr/local/bin/vpn-health-check.py /usr/local/bin/add-wg-profile.py
 cat > /etc/cron.d/vpn-watchdog <<EOF
 # vpn-watchdog: token-free health check every 5 min (silent when healthy)
-*/5 * * * * root WG_EASY_CONFIG=$INSTALL_DIR/config/wg0.json DASH_URL=http://$DNS_IP:$DASH_PORT/ python3 /usr/local/bin/vpn-health-check.py
+# v3: 16 checks incl. SYSTEM tier (RAM/CPU/disk/failed units) + on-cadence
+# speed test; flags land in INCIDENTS_LOG for the dashboard Watchdog tab.
+*/5 * * * * root WG_EASY_CONFIG=$INSTALL_DIR/config/wg0.json DASH_URL=http://$DNS_IP:$DASH_PORT/ INCIDENTS_LOG=$INSTALL_DIR/dashboard/data/vpn-incidents.jsonl WD_CONFIG_FILE=$INSTALL_DIR/dashboard/data/watchdog-config.json "ADD_WG_PROFILE_CMD=bash /usr/local/bin/add-wg-profile.py healthcheck" python3 /usr/local/bin/vpn-health-check.py
 EOF
 chmod 644 /etc/cron.d/vpn-watchdog
 
@@ -335,7 +347,7 @@ fi
 # ------------------------------------------------------------------ verify --
 log "running the health check (must print nothing)"
 set +e
-OUT="$(WG_EASY_CONFIG=$INSTALL_DIR/config/wg0.json DASH_URL=http://$DNS_IP:$DASH_PORT/ \
+OUT="$(WG_EASY_CONFIG=$INSTALL_DIR/config/wg0.json DASH_URL=http://$DNS_IP:$DASH_PORT/ INCIDENTS_LOG=$INSTALL_DIR/dashboard/data/vpn-incidents.jsonl WD_CONFIG_FILE=$INSTALL_DIR/dashboard/data/watchdog-config.json \
     python3 /usr/local/bin/vpn-health-check.py 2>&1)"
 RC=$?
 set -e
@@ -359,7 +371,8 @@ Next steps:
 1. Create a device profile in the wg-easy UI (or add-wg-profile.py).
 2. Import it in the WireGuard app (QR) and connect.
 3. The watchdog covers container, tunnel, 6 firewall rules, AdGuard,
-   dashboard, endpoint sanity, rejected handshakes, and a live egress test.
+   dashboard, endpoint sanity, rejected handshakes, a live egress test,
+   an on-cadence speed test, and SYSTEM checks (RAM/CPU/disk/failed units).
 4. For Hermes-based hosts: create the two Hermes cron jobs per
    docs/04-health-monitoring.md (no_agent watchdog + event-woken autofix).
 EOF

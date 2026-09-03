@@ -6,30 +6,47 @@ watchdog** and an AI that only wakes up to fix things when flagged.
 ## Architecture
 
 ```
-watchdog (no_agent, every 5m)          autofix (LLM agent, every 30m)
-  runs vpn-health-check.py               receives watchdog output (context_from)
+watchdog (no_agent, every 5m)          autofix (LLM agent, every 2h fallback)
+  runs vpn-health-check.py (v3)          receives watchdog output (context_from)
   checks: container, wg0, 51820,         if FLAG: lines present → diagnose + fix
   nft rules, AdGuard DNS, blocking       if clean → stay silent
   healthy → prints nothing (silent)      reports only when it fixed something
-  broken → prints FLAG: lines
-  └─ delivered to the user (alert)
+  broken → FLAG: lines
+    ├─ Tier 1 (token-free): scripted fixes (restart units, re-apply nft
+    │    rules, restart wg-easy, journal/apt cleanup on disk pressure,
+    │    restart failed systemd units), then re-check; clean → detailed
+    │    "auto-fixed" notice, exit 0 — no LLM tokens spent
+    ├─ flags that survive → INCIDENTS_LOG + /tmp/vpn-last-flags.txt
+    │    (bridge file the woken AI reads FIRST) + event-driven wake
+    └─ delivered to the user (alert)
 ```
 
-The watchdog is pure script execution — no model, no tokens. The autofix job
-uses the cheapest available model and only spends tokens when something is
-actually broken.
+The watchdog is pure script execution — no model, no tokens. System checks
+(RAM/CPU/disk/failed units) run FIRST each tick so the egress and speed tests
+don't skew the load reading; a full Ookla test only runs on a cadence
+(`SPEEDTEST_EVERY_S`, default 1800s = 30 min — it saturates the uplink ~20 s,
+so it never runs every 5-min tick). Every flagged event is ALSO appended to
+`INCIDENTS_LOG` (JSONL, capped) so the dashboard's Watchdog tab can show what
+was found and what was done about it.
 
 ## The health-check script
 
 `scripts/vpn-health-check.py` — parameterized via env vars (defaults match this
 playbook): `WG_SUBNET=10.66.66.0/24`, `WG_IF=wg0`, `WG_PORT=51820`,
-`UI_PORT=51821`, `DNS_IP=10.66.66.1`, `CONTAINER=wg-easy`, `ADGUARD_UNIT=adguardhome`.
+`UI_PORT=51821`, `DNS_IP=10.66.66.1`, `CONTAINER=wg-easy`, `ADGUARD_UNIT=adguardhome`,
+`INCIDENTS_LOG=<dashboard data dir>/vpn-incidents.jsonl`,
+`WD_CONFIG_FILE=<dashboard data dir>/watchdog-config.json` (the dashboard's
+Watchdog tab is the source of truth for the SYSTEM thresholds when it has
+saved values), `ADD_WG_PROFILE_CMD` (tier-1 healthcheck-client recreate —
+portable installs set `bash /usr/local/bin/add-wg-profile.py healthcheck`).
 
 Checks (each failure prints a `FLAG:` line):
 
 1. wg-easy container running + healthy ("starting" warmup is not a flag)
 2. wg0 interface up, port 51820/udp listening
-3. nft rules present: MASQUERADE, 2x FORWARD accept, UI-port public block
+3. nft rules present: MASQUERADE, 2x FORWARD accept, UI-port public block,
+   2x MSS clamp (eth0 MTU 1400 + wg0 MTU 1320 require clamped MSS 1240 —
+   without it, big sites like DDG stall on TLS while small sites work)
 4. AdGuard unit active + answering on the tunnel IP
 5. Ad blocking still effective (test domain resolves to 0.0.0.0)
 6. `wg-nft-rules.service` enabled (survives reboot)
@@ -40,15 +57,30 @@ Checks (each failure prints a `FLAG:` line):
    The dedicated healthcheck peer is exempt (it legitimately uses the test IP).
 9. **Active egress test** — every run spins a throwaway WireGuard client in a
    netns using the dedicated `healthcheck` peer's key and proves real traffic:
-   handshake → ICMP to 1.1.1.1 → HTTPS egress with the server's public IP.
+   handshake → ICMP to 1.1.1.1 → HTTPS egress with the expected public IP.
    Catches forwarding/NAT/routing breakage that presence checks miss.
 10. **Rejected-handshake detector** — captures inbound UDP on the WG port for
     15s and flags public sources sending repeated handshake-inits (length 148)
     that don't match any recently-handshaken peer. This is the "device has an
     outdated/foreign profile" failure: WireGuard silently ignores them, so the
-    device shows "connected" but has no internet. The MSS clamp rules are also
-    checked (eth0 MTU 1400 + wg0 MTU 1320 require clamped MSS 1240 — without
-    it, big sites like DDG stall on TLS while small sites work).
+    device shows "connected" but has no internet.
+11. **On-cadence speed test** — Ookla every `SPEEDTEST_EVERY_S` (default 30
+    min), flags when down/up/ping breach thresholds (defaults 50 Mbps / 30
+    Mbps / 100 ms). Slow flags have NO scripted fix — they go to the AI tier.
+12. SYSTEM: memory pressure — RAM % ≥ `RAM_PCT_MAX` (90) and/or swap ≥ 50%.
+    No scripted fix — the AI investigates top consumers.
+13. SYSTEM: sustained CPU load — 5-min loadavg ≥ cores × `LOAD_FACTOR` (2.0).
+    No scripted fix — the AI investigates top processes.
+14. SYSTEM: root disk — % ≥ `DISK_PCT_MAX` (85, warn) / `DISK_CRIT_PCT` (95).
+    Tier 1: `journalctl --vacuum-size=200M && apt-get clean` (safe, no-op when
+    already small); still over → AI tier.
+15. SYSTEM: failed systemd units — Tier 1 restarts them; still failed → the AI
+    reads their logs and reports the cause.
+
+(The production host this playbook was curated from additionally runs a
+16th check — exit-provider sandbox sanity. It skips itself cleanly when
+`EXIT_STATE` doesn't exist, so plain playbook installs run the 15 checks
+above; the script never hard-depends on box-specific files.)
 
 ## Event-driven AI wake (tokens only when broken)
 
@@ -66,14 +98,15 @@ arrive). Note: Python's `ipaddress` classifies TEST-NET ranges
 (203.0.113.0/24 etc.) as private — don't use them as drill IPs.
 
 Setup requirement: create the healthcheck peer once —
-`bash /root/wg-easy/add-wg-profile.sh healthcheck` (its key lives in the
-wg-easy volume; the script reads it from wg0.json).
+`bash /usr/local/bin/add-wg-profile.py healthcheck` (its key lives in the
+wg-easy volume; the script reads it from wg0.json). The `setup-vpn.sh`
+installer creates it automatically.
 
 The `scripts/setup-vpn.sh` installer wires all of the above automatically,
 including a plain-cron watchdog entry (no Hermes required):
 
 ```cron
-*/5 * * * * root WG_EASY_CONFIG=/opt/vpn-stack/config/wg0.json python3 /usr/local/bin/vpn-health-check.py
+*/5 * * * * root WG_EASY_CONFIG=/opt/vpn-stack/config/wg0.json DASH_URL=http://10.66.66.1:8088/ INCIDENTS_LOG=/opt/vpn-stack/dashboard/data/vpn-incidents.jsonl WD_CONFIG_FILE=/opt/vpn-stack/dashboard/data/watchdog-config.json "ADD_WG_PROFILE_CMD=bash /usr/local/bin/add-wg-profile.py healthcheck" python3 /usr/local/bin/vpn-health-check.py
 ```
 
 For Hermes hosts, instead use the two cron jobs described below (the watchdog
@@ -89,13 +122,15 @@ broken (delivered as the alert).
 cronjob(action='create', name='vpn-watchdog', schedule='every 5m',
         no_agent=True, script='vpn-health-check.py', deliver='origin')
 
-# 2. Autofix — cheap model, only acts on flags
-cronjob(action='create', name='vpn-autofix', schedule='every 30m',
+# 2. Autofix — cheap model, only acts on flags (2h silent fallback sweep;
+#    the watchdog normally wakes it event-driven within seconds of a flag)
+cronjob(action='create', name='vpn-autofix', schedule='every 2h',
         context_from=['<watchdog_job_id>'], deliver='origin',
         model={'model': '<cheap-model>', 'provider': '<provider>'},
         enabled_toolsets=['terminal', 'file'],
         prompt='''You are the VPN autofix agent for a WireGuard (wg-easy) +
-AdGuard Home stack. The latest watchdog output is injected above.
+AdGuard Home stack. READ /tmp/vpn-last-flags.txt FIRST if it exists (it is
+the watchdog's flag bridge and is authoritative over any injected context).
 Rules:
 1. If there are NO "FLAG:" lines: the stack is healthy. Do nothing.
    Reply with exactly nothing.
@@ -103,10 +138,14 @@ Rules:
    - restart containers (docker restart wg-easy) or units (systemctl restart adguardhome)
    - re-add missing nft rules (see wg-nft-rules.service for the exact commands)
    - restart the wg-nft-rules unit if rules vanished
+   - vacuum the journal / clean apt cache on SYSTEM: root disk flags
+   - restart failed systemd units named in SYSTEM flags (read their logs first)
    - wipe stale wg-easy volume configs only as a last resort (container in crash loop)
    - NEVER modify the adguardhome blocklist config or the docker-compose env
-3. After fixing, re-run scripts/vpn-health-check.py (at ~/.hermes/scripts/) and
-   confirm it prints nothing.
+   - NEVER reboot the host
+3. After fixing, re-run the health check (/usr/local/bin/vpn-health-check.py
+   on installer hosts, ~/.hermes/scripts/vpn-health-check.py on Hermes hosts)
+   and confirm it prints nothing.
 4. Report concisely: what was flagged, what you did, and the verification
    result. If you could not fix something, say exactly what remains broken.''')
 ```
